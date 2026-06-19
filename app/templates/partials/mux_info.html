@@ -1,0 +1,120 @@
+{% if mux %}
+<!-- DVB Triplet -->
+<div class="flux-dvb-triplet">
+    <div class="flux-dvb-triplet__item">
+        <span class="flux-dvb-triplet__label">ONID</span>
+        <span class="flux-dvb-triplet__value">{{ "0x%04X"|format(mux.original_network_id) }} ({{ mux.original_network_id }})</span>
+    </div>
+    <div class="flux-dvb-triplet__separator">
+        <i data-lucide="chevron-right" class="flux-icon--xs"></i>
+    </div>
+    <div class="flux-dvb-triplet__item">
+        <span class="flux-dvb-triplet__label">TSID</span>
+        <span class="flux-dvb-triplet__value">{{ "0x%04X"|format(mux.ts_id) }} ({{ mux.ts_id }})</span>
+    </div>
+    <div class="flux-dvb-triplet__separator">
+        <i data-lucide="chevron-right" class="flux-icon--xs"></i>
+    </div>
+    <div class="flux-dvb-triplet__item">
+        <span class="flux-dvb-triplet__label">NETWORK</span>
+        <span class="flux-dvb-triplet__value">{{ mux.network_name or '—' }}</span>
+    </div>
+    {% if mux.country_code %}
+    <div class="flux-dvb-triplet__separator">
+        <i data-lucide="chevron-right" class="flux-icon--xs"></i>
+    </div>
+    <div class="flux-dvb-triplet__item">
+        <span class="flux-dvb-triplet__label">COUNTRY</span>
+        <span class="flux-dvb-triplet__value">{{ mux.country_code }}</span>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Mux stats -->
+<div class="flux-mux-stats">
+    <div class="flux-metric flux-metric--inline">
+        <i data-lucide="radio-tower" class="flux-icon--sm"></i>
+        <span class="flux-metric__value--sm">{{ mux.services|length }}</span>
+        <span class="flux-metric__label--sm">Services</span>
+    </div>
+    <div class="flux-metric flux-metric--inline">
+        <i data-lucide="gauge" class="flux-icon--sm"></i>
+        <span class="flux-metric__value--sm flux-metric__value--mono">
+            {{ "%.1f"|format(mux.total_bitrate / 1_000_000) }} Mbps
+        </span>
+        <span class="flux-metric__label--sm">Total Bitrate</span>
+    </div>
+</div>
+
+<!-- Services Table -->
+<div class="flux-table-container">
+    <table class="flux-table" id="services-table">
+        <thead>
+            <tr>
+                <th class="flux-table__th flux-table__th--check">
+                    <input type="checkbox" class="flux-checkbox" id="select-all-services"
+                           onchange="toggleAllServices(this)">
+                </th>
+                <th class="flux-table__th">SID</th>
+                <th class="flux-table__th">SERVICE NAME</th>
+                <th class="flux-table__th">PROVIDER</th>
+                <th class="flux-table__th">TYPE</th>
+                <th class="flux-table__th flux-table__th--right">BITRATE</th>
+                <th class="flux-table__th">PMT PID</th>
+                <th class="flux-table__th">PCR PID</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for svc in mux.services %}
+            <tr class="flux-table__row">
+                <td class="flux-table__td flux-table__td--check">
+                    <input type="checkbox" class="flux-checkbox service-checkbox"
+                           name="selected_services" value="{{ svc.service_id }}" checked>
+                </td>
+                <td class="flux-table__td flux-table__td--mono">{{ "0x%04X"|format(svc.service_id) }}</td>
+                <td class="flux-table__td flux-table__td--name">
+                    <span class="flux-service-name">{{ svc.service_name }}</span>
+                </td>
+                <td class="flux-table__td">{{ svc.provider or '—' }}</td>
+                <td class="flux-table__td">
+                    {% if 'TV' in svc.service_type_desc or 'HD' in svc.service_type_desc %}
+                    <span class="flux-badge flux-badge--primary">
+                        <i data-lucide="tv" class="flux-icon--xs"></i>
+                        {{ svc.service_type_desc }}
+                    </span>
+                    {% elif 'Radio' in svc.service_type_desc %}
+                    <span class="flux-badge flux-badge--sage">
+                        <i data-lucide="radio" class="flux-icon--xs"></i>
+                        {{ svc.service_type_desc }}
+                    </span>
+                    {% else %}
+                    <span class="flux-badge flux-badge--outline">
+                        {{ svc.service_type_desc }}
+                    </span>
+                    {% endif %}
+                </td>
+                <td class="flux-table__td flux-table__td--mono flux-table__td--right">
+                    {{ "%.2f"|format(svc.bitrate / 1_000_000) }} Mbps
+                </td>
+                <td class="flux-table__td flux-table__td--mono">{{ "0x%04X"|format(svc.pmt_pid) }}</td>
+                <td class="flux-table__td flux-table__td--mono">{{ "0x%04X"|format(svc.pcr_pid) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Update lock indicator -->
+<script>
+    document.getElementById('lock-status').innerHTML =
+        '<i data-lucide="lock" class="flux-icon--sm"></i><span>LOCKED</span>';
+    document.getElementById('lock-status').className = 'flux-badge flux-badge--success';
+    lucide.createIcons();
+</script>
+
+{% else %}
+<div class="flux-empty-state flux-empty-state--error">
+    <i data-lucide="alert-triangle" class="flux-empty-state__icon"></i>
+    <p>Could not analyze mux. Check frequency, device connection, and signal strength.</p>
+</div>
+{% endif %}

@@ -1,0 +1,26 @@
+venv/
+__pycache__/
+*.pyc
+.env
+recordings/*.ts
+node_modules/
+static/css/output.css
+*.egg-info/
+dist/
+# Local Pi runtime state
+.atl/
+
+# Debug artifacts
+debug.log
+
+# Transport stream captures at root (recordings/ already covered)
+/*.ts
+
+# SDD artifacts
+openspec/
+
+# Pi settings
+.pi/
+
+# Local Python version pinning
+.python-version

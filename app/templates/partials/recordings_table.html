@@ -1,0 +1,44 @@
+{% if recordings %}
+<div class="flux-table-container">
+    <table class="flux-table" id="recordings-library">
+        <thead>
+            <tr>
+                <th class="flux-table__th">FILENAME</th>
+                <th class="flux-table__th flux-table__th--right">SIZE</th>
+                <th class="flux-table__th">CREATED</th>
+                <th class="flux-table__th flux-table__th--actions">ACTIONS</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rec in recordings %}
+            <tr class="flux-table__row">
+                <td class="flux-table__td flux-table__td--mono">
+                    <i data-lucide="file-video" class="flux-icon--sm flux-color--accent"></i>
+                    {{ rec.filename }}
+                </td>
+                <td class="flux-table__td flux-table__td--mono flux-table__td--right">
+                    {{ rec.size_display }}
+                </td>
+                <td class="flux-table__td flux-table__td--mono">
+                    {{ rec.created[:19] | replace("T", " ") }}
+                </td>
+                <td class="flux-table__td flux-table__td--actions">
+                    <button class="flux-btn flux-btn--ghost flux-btn--sm flux-btn--danger-hover"
+                            hx-delete="/api/recordings/{{ rec.filename }}"
+                            hx-target="#recordings-table"
+                            hx-swap="innerHTML"
+                            hx-confirm="Delete {{ rec.filename }}?">
+                        <i data-lucide="trash-2" class="flux-icon--sm"></i>
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="flux-empty-state">
+    <i data-lucide="folder-open" class="flux-empty-state__icon"></i>
+    <p>No recordings yet. Analyze a mux and start capturing.</p>
+</div>
+{% endif %}

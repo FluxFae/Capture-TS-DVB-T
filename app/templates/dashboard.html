@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="flux-dashboard">
+    <!-- ═══════════════ ROW 1: RF Control + Signal ═══════════════ -->
+    <div class="flux-dashboard__row flux-dashboard__row--top">
+
+        <!-- RF Control Module -->
+        <section class="flux-card flux-card--rf" id="rf-control">
+            <div class="flux-card__header">
+                <div class="flux-card__header-title">
+                    <i data-lucide="radio" class="flux-card__icon"></i>
+                    <h2>RF Control</h2>
+                </div>
+                <div class="flux-badge flux-badge--outline" id="lock-status">
+                    <i data-lucide="lock-open" class="flux-icon--sm"></i>
+                    <span>UNLOCKED</span>
+                </div>
+            </div>
+
+            <form id="tune-form"
+                  hx-post="/api/analyze"
+                  hx-target="#mux-analysis"
+                  hx-swap="innerHTML"
+                  hx-indicator="#analyze-spinner">
+
+                <!-- Device selector -->
+                <div class="flux-form-group">
+                    <label class="flux-label" for="adapter">RECEIVER DEVICE</label>
+                    <select class="flux-select" name="adapter" id="adapter">
+                        {% for device in devices %}
+                        <option value="{{ device.index }}"
+                            {% if 'DVB-T' in device.delivery_systems|join(',') %}selected{% endif %}>
+                            {{ device.index }}: {{ device.name }}
+                        </option>
+                        {% endfor %}
+                        {% if not devices %}
+                        <option value="-1" disabled selected>No devices found</option>
+                        {% endif %}
+                    </select>
+                </div>
+
+                <div class="flux-form-row">
+                    <!-- Frequency -->
+                    <div class="flux-form-group flux-form-group--grow">
+                        <label class="flux-label" for="frequency">FREQUENCY (Hz)</label>
+                        <input type="number" class="flux-input flux-input--mono"
+                               name="frequency" id="frequency"
+                               value="674000000" min="100000000" max="900000000"
+                               step="1000000" required>
+                        <span class="flux-input-hint" id="freq-mhz">674.0 MHz</span>
+                    </div>
+
+                    <!-- Bandwidth -->
+                    <div class="flux-form-group">
+                        <label class="flux-label" for="bandwidth">BW (MHz)</label>
+                        <select class="flux-select" name="bandwidth" id="bandwidth">
+                            <option value="6">6</option>
+                            <option value="7">7</option>
+                            <option value="8" selected>8</option>
+                        </select>
+                    </div>
+
+                    <!-- Delivery System -->
+                    <div class="flux-form-group">
+                        <label class="flux-label" for="delivery_system">SYSTEM</label>
+                        <select class="flux-select" name="delivery_system" id="delivery_system">
+                            <option value="DVB-T">DVB-T</option>
+                            <option value="DVB-T2">DVB-T2</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flux-form-row">
+                    <div class="flux-form-group">
+                        <label class="flux-label" for="analysis_duration">SCAN DURATION (s)</label>
+                        <input type="number" class="flux-input flux-input--mono"
+                               name="analysis_duration" id="analysis_duration"
+                               value="10" min="5" max="60" step="5">
+                    </div>
+                </div>
+
+                <button type="submit" class="flux-btn flux-btn--primary flux-btn--full" id="btn-analyze">
+                    <span class="flux-btn__content">
+                        <i data-lucide="search" class="flux-icon"></i>
+                        <span>Analyze Mux</span>
+                    </span>
+                    <span class="flux-spinner" id="analyze-spinner"></span>
+                </button>
+            </form>
+        </section>
+
+        <!-- Signal Telemetry -->
+        <section class="flux-card flux-card--telemetry" id="signal-telemetry">
+            <div class="flux-card__header">
+                <div class="flux-card__header-title">
+                    <i data-lucide="activity" class="flux-card__icon"></i>
+                    <h2>Signal Telemetry</h2>
+                </div>
+            </div>
+            <div class="flux-telemetry-grid">
+                <div class="flux-metric">
+                    <span class="flux-metric__value" id="metric-state">IDLE</span>
+                    <span class="flux-metric__label">STATUS</span>
+                </div>
+                <div class="flux-metric">
+                    <span class="flux-metric__value flux-metric__value--mono" id="metric-filesize">0 B</span>
+                    <span class="flux-metric__label">FILE SIZE</span>
+                </div>
+                <div class="flux-metric">
+                    <span class="flux-metric__value flux-metric__value--mono" id="metric-duration">00:00</span>
+                    <span class="flux-metric__label">DURATION</span>
+                </div>
+                <div class="flux-metric">
+                    <span class="flux-metric__value flux-metric__value--mono" id="metric-bitrate">—</span>
+                    <span class="flux-metric__label">BITRATE</span>
+                </div>
+            </div>
+
+            <!-- Recording file progress -->
+            <div class="flux-record-progress" id="record-progress" style="display: none;">
+                <div class="flux-record-progress__bar">
+                    <div class="flux-record-progress__fill" id="progress-fill"></div>
+                </div>
+                <span class="flux-record-progress__label" id="progress-label"></span>
+            </div>
+        </section>
+    </div>
+
+    <!-- ═══════════════ ROW 2: Mux Analyzer ═══════════════ -->
+    <section class="flux-card flux-card--mux" id="mux-section">
+        <div class="flux-card__header">
+            <div class="flux-card__header-title">
+                <i data-lucide="layers" class="flux-card__icon"></i>
+                <h2>Mux Analyzer</h2>
+            </div>
+        </div>
+        <div id="mux-analysis">
+            <div class="flux-empty-state">
+                <i data-lucide="scan-search" class="flux-empty-state__icon"></i>
+                <p>No mux analyzed yet. Set tuning parameters above and click <strong>Analyze Mux</strong>.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══════════════ ROW 3: Recorder + Log ═══════════════ -->
+    <div class="flux-dashboard__row flux-dashboard__row--bottom">
+
+        <!-- TS Recorder -->
+        <section class="flux-card flux-card--recorder" id="recorder-section">
+            <div class="flux-card__header">
+                <div class="flux-card__header-title">
+                    <i data-lucide="hard-drive-download" class="flux-card__icon"></i>
+                    <h2>TS Recorder</h2>
+                </div>
+            </div>
+            <div id="recorder-panel">
+                {% include "partials/recorder_panel.html" %}
+            </div>
+        </section>
+
+        <!-- Technical Log -->
+        <section class="flux-card flux-card--log" id="log-section">
+            <div class="flux-card__header">
+                <div class="flux-card__header-title">
+                    <i data-lucide="terminal" class="flux-card__icon"></i>
+                    <h2>System Log</h2>
+                </div>
+                <button class="flux-btn flux-btn--ghost flux-btn--sm" onclick="clearLog()">
+                    <i data-lucide="trash-2" class="flux-icon--sm"></i>
+                    <span>Clear</span>
+                </button>
+            </div>
+            <div class="flux-log" id="log-console">
+                <div class="flux-log__entry flux-log__entry--info">
+                    <span>[SYSTEM] Capture-TS initialized. Waiting for commands...</span>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- ═══════════════ ROW 4: Recordings Library ═══════════════ -->
+    <section class="flux-card flux-card--library" id="library-section">
+        <div class="flux-card__header">
+            <div class="flux-card__header-title">
+                <i data-lucide="folder-open" class="flux-card__icon"></i>
+                <h2>Recordings Library</h2>
+            </div>
+            <button class="flux-btn flux-btn--ghost flux-btn--sm"
+                    hx-get="/api/recordings"
+                    hx-target="#recordings-table"
+                    hx-swap="innerHTML">
+                <i data-lucide="refresh-cw" class="flux-icon--sm"></i>
+                <span>Refresh</span>
+            </button>
+        </div>
+        <div id="recordings-table">
+            {% include "partials/recordings_table.html" %}
+        </div>
+    </section>
+</div>
+{% endblock %}

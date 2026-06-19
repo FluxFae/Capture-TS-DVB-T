@@ -1,0 +1,165 @@
+/**
+ * flux-tokens.css — Flux Design System Tokens
+ *
+ * Distribute alongside ui-core-bundle.js.
+ * Import ONCE in each app's root stylesheet or index.html:
+ *
+ *   <link rel="stylesheet" href="/flux-tokens.css">
+ *   <script type="module"  src="/ui-core-bundle.js"></script>
+ *
+ * These tokens are consumed by ui-header and ui-footer via Shadow DOM
+ * inheritance. They also serve as the single source of truth for all
+ * Flux apps to guarantee visual harmony across the shell.
+ *
+ * Source: DESIGN.md — "Design System Inspired by Flux"
+ */
+
+/* ─────────────────────────────────────────────────────────────
+   1. BRAND PALETTE  (static — never change per theme)
+   ───────────────────────────────────────────────────────────── */
+:root {
+  /* Primary brand */
+  --color-flux-wine:         #6B1F3F;  /* Primary CTA, active state anchors     */
+  --color-flux-burgundy:     #8B2E5F;  /* Hover/emphasis; app-icon background   */
+  --color-flux-accent:       #D946A6;  /* Highlights, focus states, toggles     */
+
+  /* Accent palette */
+  --color-flux-terracotta:   #C97A47;  /* Secondary accent, warm highlights     */
+  --color-flux-sage:         #6B9E7F;  /* Data vis categorical, positive calm   */
+  --color-flux-slate-blue:   #4A5E8C;  /* Info badges, links                    */
+
+  /* Interactive states */
+  --color-flux-active:       #D946A6;  /* Active/selected, focus rings          */
+  --color-flux-hover:        #A01D6C;  /* Interactive hover; deepens primary    */
+  --color-flux-disabled:     #5A5A5A;  /* Disabled buttons, muted states        */
+
+  /* Semantic feedback */
+  --color-flux-success:      #10B981;
+  --color-flux-warning:      #F97316;
+  --color-flux-error:        #EF4444;
+
+  /* Neutral scale */
+  --color-flux-charcoal:     #1A1A1A;
+  --color-flux-dark-gray:    #2D2D2D;
+  --color-flux-medium-gray:  #4A4A4A;
+  --color-flux-light-gray:   #A0A0A0;
+  --color-flux-off-white:    #F8F8F8;
+  --color-flux-white:        #FFFFFF;
+
+  /* Surfaces & borders */
+  --color-flux-card-surface: #232323;
+  --color-flux-border:       #3D3D3D;
+  --color-flux-border-active:#D946A6;
+  --color-flux-overlay:      rgba(0, 0, 0, 0.40);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   2. THEME TOKENS  (consumed by ui-header and ui-footer)
+   Apply .dark / .light (or data-theme="dark" / "light") on <html>.
+   The theme-change event from ui-header tells you which class to set.
+   ───────────────────────────────────────────────────────────── */
+
+/* Default: dark */
+:root,
+.dark,
+[data-theme="dark"] {
+  --theme-surface:          #0F0F0F;
+  --theme-border:           #2A2A2A;
+  --theme-text-primary:     #F5F5F5;
+  --theme-text-secondary:   #A0A0A0;
+}
+
+.light,
+[data-theme="light"] {
+  --theme-surface:          #FFFFFF;
+  --theme-border:           #E5E7EB;
+  --theme-text-primary:     #1A1A1A;
+  --theme-text-secondary:   #4A4A4A;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   3. TYPOGRAPHY TOKENS
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --font-sans:   'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:   'JetBrains Mono', 'Courier New', monospace;
+
+  /* Size scale */
+  --text-display: 3rem;       /* 48px — dashboard title, hero                */
+  --text-h1:      2.25rem;    /* 36px — major section headers                */
+  --text-h2:      1.75rem;    /* 28px — subsection headers, card titles      */
+  --text-h3:      1.5rem;     /* 24px — widget headers, modal titles         */
+  --text-lg:      1rem;       /* 16px — primary body                         */
+  --text-base:    0.875rem;   /* 14px — standard interface text              */
+  --text-sm:      0.75rem;    /* 12px — secondary info, timestamps           */
+  --text-xs:      0.6875rem;  /* 11px — captions, footnotes                  */
+
+  /* Weight */
+  --font-regular:   400;
+  --font-medium:    500;
+  --font-semibold:  600;
+  --font-bold:      700;
+
+  /* Letter spacing */
+  --tracking-tighter: -0.075em;  /* display/h1  */
+  --tracking-tight:   -0.03em;   /* h2          */
+  --tracking-normal:   0;
+  --tracking-wide:     0.03em;   /* buttons     */
+  --tracking-wider:    0.05em;   /* labels/caps */
+}
+
+/* ─────────────────────────────────────────────────────────────
+   4. SPACING TOKENS  (8px base unit)
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --space-1:   0.25rem;  /*  4px */
+  --space-2:   0.5rem;   /*  8px */
+  --space-3:   0.75rem;  /* 12px */
+  --space-4:   1rem;     /* 16px */
+  --space-6:   1.5rem;   /* 24px */
+  --space-8:   2rem;     /* 32px */
+  --space-12:  3rem;     /* 48px */
+}
+
+/* ─────────────────────────────────────────────────────────────
+   5. BORDER RADIUS TOKENS
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --radius-xs:   0.25rem;  /*  4px — checkboxes, tight badges  */
+  --radius-sm:   0.375rem; /*  6px — inputs, small buttons     */
+  --radius-md:   0.5rem;   /*  8px — buttons, nav items        */
+  --radius-lg:   0.75rem;  /* 12px — cards, modals             */
+  --radius-xl:   1rem;     /* 16px — large containers          */
+  --radius-full: 9999px;   /* pill */
+  --radius-circle: 50%;    /* avatars, circular indicators     */
+}
+
+/* ─────────────────────────────────────────────────────────────
+   6. ELEVATION / SHADOW TOKENS
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --shadow-0: none;
+  --shadow-1: 0 2px  8px  rgba(0, 0, 0, 0.08);                                      /* cards       */
+  --shadow-2: 0 4px  12px rgba(0, 0, 0, 0.12);                                      /* hovered, focus */
+  --shadow-3: 0 6px  20px rgba(0, 0, 0, 0.16);                                      /* modals      */
+  --shadow-4: 0 8px  24px rgba(0, 0, 0, 0.16), 0 0 16px rgba(107, 31, 63, 0.12);   /* premium     */
+  --shadow-accent: 0 4px 12px rgba(107, 31, 63, 0.30);                              /* CTA hover   */
+}
+
+/* ─────────────────────────────────────────────────────────────
+   7. LAYOUT TOKENS  (ui-header / ui-footer specific)
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --ui-header-max-width: 1440px;
+  --ui-header-padding:   1rem 2rem;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   8. TRANSITION TOKENS
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --transition-fast:   all 150ms ease-in-out;
+  --transition-base:   all 200ms ease-in-out;
+  --transition-smooth: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-spring: all 500ms cubic-bezier(0.4, 0, 0.2, 1);
+}

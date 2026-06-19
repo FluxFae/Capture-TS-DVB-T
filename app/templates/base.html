@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Capture-TS{% endblock %} — DVB-T Recorder</title>
+    <meta name="description" content="Professional DVB-T Transport Stream recorder for broadcast QA teams">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/css/flux-tokens.css">
+    <link rel="stylesheet" href="/static/css/flux.css">
+    <script type="module" src="/static/js/ui-core-bundle.js"></script>
+
+    {% block head %}{% endblock %}
+</head>
+<body class="flux-body" hx-boost="true">
+    <!-- Header -->
+    <ui-header theme="dark">
+        <i data-lucide="radio" slot="app-icon" style="color: white;"></i>
+        <span slot="app-title">Capture-TS</span>
+        <span slot="app-description">DVB-T Recorder</span>
+        <span class="flux-connection-status" id="ws-status" slot="app-utilities">
+            <span class="flux-status-dot flux-status-dot--disconnected"></span>
+            <span class="flux-status-label">Disconnected</span>
+        </span>
+    </ui-header>
+
+    <!-- Main content -->
+    <main class="flux-main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Scripts -->
+    <script src="/static/js/app.js"></script>
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // HTMX after-swap reinitialize icons
+        document.body.addEventListener('htmx:afterSwap', function() {
+            lucide.createIcons();
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+    
+    <ui-footer style="--theme-surface: var(--color-flux-surface);" githubUrl="https://github.com/FluxFae/Capture-TS-DVB-T">
+        <span slot="footer-license">MIT License</span>
+        <span slot="footer-version">v0.1.5</span>
+    </ui-footer>
+</body>
+</html>

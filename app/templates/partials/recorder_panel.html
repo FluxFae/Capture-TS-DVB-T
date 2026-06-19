@@ -1,0 +1,62 @@
+<form id="recorder-form">
+<!-- Record mode selector -->
+<div class="flux-form-group">
+    <label class="flux-label">CAPTURE MODE</label>
+    <div class="flux-radio-group">
+        <label class="flux-radio-label">
+            <input type="radio" name="record_mode" value="full_mux" checked class="flux-radio"
+                   onchange="toggleServiceSelection(this)">
+            <span>Full Mux</span>
+        </label>
+        <label class="flux-radio-label">
+            <input type="radio" name="record_mode" value="selected" class="flux-radio"
+                   onchange="toggleServiceSelection(this)">
+            <span>Selected Services</span>
+        </label>
+    </div>
+</div>
+
+<!-- Duration -->
+<div class="flux-form-group">
+    <label class="flux-label" for="duration">DURATION (seconds, 0 = unlimited)</label>
+    <input type="number" class="flux-input flux-input--mono"
+           name="duration" id="duration"
+           value="0" min="0" step="10">
+</div>
+
+<!-- Record / Stop Button -->
+{% if recording_state == 'recording' or recording_state == 'tuning' %}
+<button type="button" class="flux-btn flux-btn--danger flux-btn--full flux-btn--rec"
+        hx-post="/api/record/stop"
+        hx-target="#recorder-panel"
+        hx-swap="innerHTML">
+    <span class="flux-rec-pulse"></span>
+    <i data-lucide="square" class="flux-icon"></i>
+    <span>Stop Recording</span>
+</button>
+{% else %}
+<button type="button" class="flux-btn flux-btn--primary flux-btn--full flux-btn--rec"
+        hx-post="/api/record/start"
+        hx-target="#recorder-panel"
+        hx-swap="innerHTML"
+        hx-include="#tune-form, #recorder-form, #services-table"
+        id="btn-record">
+    <i data-lucide="circle" class="flux-icon"></i>
+    <span>Start Recording</span>
+</button>
+{% endif %}
+</form>
+
+{% if current_recording and recording_state == 'idle' and current_recording.file_size_bytes > 0 %}
+<div class="flux-record-summary">
+    <i data-lucide="check-circle" class="flux-icon flux-color--success"></i>
+    <div>
+        <strong>{{ current_recording.filename }}</strong>
+        <span class="flux-text--muted">
+            {{ current_recording.duration_seconds|int }}s —
+            {% set size_mb = current_recording.file_size_bytes / (1024 * 1024) %}
+            {{ "%.1f"|format(size_mb) }} MB
+        </span>
+    </div>
+</div>
+{% endif %}
