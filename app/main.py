@@ -8,12 +8,14 @@ Design: Flux Design System (dark-first, burgundy/magenta brand)
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import FormData
 
 from app.services.tsduck_service import TSDuckService, RecordingState
 
@@ -26,28 +28,27 @@ connected_websockets: set[WebSocket] = set()
 _main_loop: asyncio.AbstractEventLoop | None = None
 
 
-async def broadcast_log(message: str) -> None:
-    """Broadcast a log message to all connected WebSocket clients."""
-    data = json.dumps({"type": "log", "message": message})
+async def _fan_out(payload: dict) -> None:
+    """Send one JSON payload to every connected client, dropping dead ones."""
+    global connected_websockets
+    data = json.dumps(payload)
     stale = set()
-    for ws in connected_websockets:
+    for ws in list(connected_websockets):
         try:
             await ws.send_text(data)
         except Exception:
             stale.add(ws)
     connected_websockets -= stale
+
+
+async def broadcast_log(message: str) -> None:
+    """Broadcast a log message to all connected WebSocket clients."""
+    await _fan_out({"type": "log", "message": message})
 
 
 async def broadcast_state(state: dict) -> None:
     """Broadcast recording state update to all connected WebSocket clients."""
-    data = json.dumps({"type": "state", **state})
-    stale = set()
-    for ws in connected_websockets:
-        try:
-            await ws.send_text(data)
-        except Exception:
-            stale.add(ws)
-    connected_websockets -= stale
+    await _fan_out({"type": "state", **state})
 
 
 def sync_log_callback(message: str) -> None:
@@ -113,15 +114,53 @@ async def dashboard(request: Request):
 # HTMX API endpoints
 # ──────────────────────────────────────────────
 
+
+class InvalidFormField(ValueError):
+    """Raised when a submitted form field is present but not a valid integer."""
+
+    def __init__(self, field: str, raw: object):
+        super().__init__(f"Invalid value for '{field}': {raw!r}")
+        self.field = field
+
+
+def _form_int(form: FormData, key: str, default: int) -> int:
+    """Parse an integer form field.
+
+    A missing or empty field yields ``default``. A field that is present but
+    malformed raises instead of falling back, because a typo in the duration
+    must never turn into an unlimited recording.
+    """
+    raw = form.get(key)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(str(raw))
+    except (TypeError, ValueError) as exc:
+        raise InvalidFormField(key, raw) from exc
+
+
+def invalid_field_response(error: InvalidFormField) -> HTMLResponse:
+    """Render a field error where the requested partial would have been swapped in."""
+    return HTMLResponse(
+        f'<div class="flux-alert flux-alert--error">{escape(str(error))}</div>',
+        status_code=400,
+    )
+
+
 @app.post("/api/analyze", response_class=HTMLResponse)
 async def analyze_mux(request: Request):
     """Analyze a mux and return the services table as HTML partial."""
     form = await request.form()
-    frequency = int(form.get("frequency", 674000000))
-    bandwidth = int(form.get("bandwidth", 8))
-    adapter = int(form.get("adapter", 1))
-    delivery_system = form.get("delivery_system", "DVB-T")
-    duration = int(form.get("analysis_duration", 10))
+    try:
+        frequency = _form_int(form, "frequency", 674000000)
+        bandwidth = _form_int(form, "bandwidth", 8)
+        # Adapter 0 is the DVB-T tuner on a WinTV-soloHD; that is the only
+        # capture path verified end to end.
+        adapter = _form_int(form, "adapter", 0)
+        duration = _form_int(form, "analysis_duration", 10)
+    except InvalidFormField as error:
+        return invalid_field_response(error)
+    delivery_system = str(form.get("delivery_system", "DVB-T"))
 
     mux_info = await tsduck_service.analyze_mux(
         frequency=frequency,
@@ -142,21 +181,22 @@ async def analyze_mux(request: Request):
 async def start_recording(request: Request):
     """Start a recording and return updated recorder panel."""
     form = await request.form()
-    frequency = int(form.get("frequency", 674000000))
-    bandwidth = int(form.get("bandwidth", 8))
-    adapter = int(form.get("adapter", 1))
-    delivery_system = form.get("delivery_system", "DVB-T")
-
-    # Parse selected services
-    service_ids = []
-    record_mode = form.get("record_mode", "full_mux")
-
-    if record_mode == "selected":
-        selected = form.getlist("selected_services")
-        service_ids = [int(s) for s in selected if s]
-
-    # Duration (0 = unlimited)
-    duration = int(form.get("duration", 0)) or None
+    try:
+        frequency = _form_int(form, "frequency", 674000000)
+        bandwidth = _form_int(form, "bandwidth", 8)
+        adapter = _form_int(form, "adapter", 0)
+        # Duration (0 or empty = unlimited)
+        duration = _form_int(form, "duration", 0) or None
+        service_ids: list[int] = []
+        if form.get("record_mode", "full_mux") == "selected":
+            for raw in form.getlist("selected_services"):
+                try:
+                    service_ids.append(int(str(raw)))
+                except (TypeError, ValueError) as exc:
+                    raise InvalidFormField("selected_services", raw) from exc
+    except InvalidFormField as error:
+        return invalid_field_response(error)
+    delivery_system = str(form.get("delivery_system", "DVB-T"))
 
     try:
         recording = await tsduck_service.start_recording(
