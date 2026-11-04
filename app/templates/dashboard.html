@@ -28,10 +28,12 @@
                 <!-- Device selector -->
                 <div class="flux-form-group">
                     <label class="flux-label" for="adapter">RECEIVER DEVICE</label>
-                    <select class="flux-select" name="adapter" id="adapter">
+                    <select class="flux-select" name="adapter" id="adapter"
+                            onchange="selectSupportedSystems(this)">
                         {% for device in devices %}
                         <option value="{{ device.index }}"
-                            {% if 'DVB-T' in device.delivery_systems|join(',') %}selected{% endif %}>
+                                data-systems="{{ device.delivery_systems|join(',') }}"
+                                {% if device.index == selected_adapter %}selected{% endif %}>
                             {{ device.index }}: {{ device.name }}
                         </option>
                         {% endfor %}
@@ -66,8 +68,12 @@
                     <div class="flux-form-group">
                         <label class="flux-label" for="delivery_system">SYSTEM</label>
                         <select class="flux-select" name="delivery_system" id="delivery_system">
-                            <option value="DVB-T">DVB-T</option>
-                            <option value="DVB-T2">DVB-T2</option>
+                            {% for system in delivery_systems %}
+                            <option value="{{ system }}"
+                                {% if system == selected_system %}selected{% endif %}>
+                                {{ system }}
+                            </option>
+                            {% endfor %}
                         </select>
                     </div>
                 </div>

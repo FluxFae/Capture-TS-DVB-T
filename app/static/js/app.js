@@ -177,7 +177,9 @@ function addLog(message, level) {
 
     const entry = document.createElement('div');
     entry.className = `flux-log__entry flux-log__entry--${level}`;
-    entry.innerHTML = `<span>${escapeHtml(message)}</span>`;
+    const text = document.createElement('span');
+    text.textContent = message;
+    entry.appendChild(text);
     console_.appendChild(entry);
 
     // Auto-scroll to bottom
@@ -256,10 +258,32 @@ function updateFreqHint() {
     }
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+// Keep the SYSTEM select coherent with the chosen receiver. A hybrid stick
+// exposes its DVB-T and DVB-C tuners as two devices, and asking one of them for
+// the other's delivery system is a hard tsp failure, so the options are limited
+// to what the selected device reports.
+function selectSupportedSystems(deviceSelect) {
+    const systemSelect = document.querySelector('#delivery_system');
+    if (!deviceSelect || !systemSelect) return;
+
+    const device = deviceSelect.options[deviceSelect.selectedIndex];
+    const systems = (device && device.dataset.systems ? device.dataset.systems : '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+
+    let firstSupported = null;
+    for (const option of systemSelect.options) {
+        const supported = systems.includes(option.value);
+        option.disabled = !supported;
+        option.hidden = !supported;
+        if (supported && firstSupported === null) firstSupported = option;
+    }
+
+    const current = systemSelect.options[systemSelect.selectedIndex];
+    if (firstSupported && (!current || current.disabled)) {
+        firstSupported.selected = true;
+    }
 }
 
 // ═══════════════ Init ═══════════════
@@ -273,6 +297,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (freqInput) {
         freqInput.addEventListener('input', updateFreqHint);
     }
+
+    // The device list is rendered by the server; the SYSTEM options must match
+    // it as soon as the page is usable, not only after the first change.
+    selectSupportedSystems(document.querySelector('#adapter'));
 
     // Keep-alive ping
     setInterval(() => {

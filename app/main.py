@@ -17,7 +17,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData
 
-from app.services.tsduck_service import TSDuckService, RecordingState
+from app.services.tsduck_service import (
+    DeviceSelectionError,
+    TSDuckService,
+    available_delivery_systems,
+    default_delivery_system,
+    default_device,
+    resolve_device,
+)
 
 # ──────────────────────────────────────────────
 # Application state
@@ -98,11 +105,15 @@ async def dashboard(request: Request):
     """Main dashboard page."""
     devices = await tsduck_service.list_devices()
     recordings = await tsduck_service.list_recordings()
+    selected_device = default_device(devices)
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
         context={
             "devices": devices,
+            "selected_adapter": selected_device.index if selected_device else -1,
+            "delivery_systems": available_delivery_systems(devices),
+            "selected_system": default_delivery_system(selected_device),
             "recordings": recordings,
             "recording_state": tsduck_service.state.value,
             "current_recording": tsduck_service.current_recording,
@@ -139,12 +150,22 @@ def _form_int(form: FormData, key: str, default: int) -> int:
         raise InvalidFormField(key, raw) from exc
 
 
-def invalid_field_response(error: InvalidFormField) -> HTMLResponse:
-    """Render a field error where the requested partial would have been swapped in."""
+def invalid_field_response(error: Exception) -> HTMLResponse:
+    """Render a rejected submission where the requested partial would have been swapped in."""
     return HTMLResponse(
         f'<div class="flux-alert flux-alert--error">{escape(str(error))}</div>',
         status_code=400,
     )
+
+
+async def _resolve_device(
+    adapter: int,
+    delivery_system: str,
+) -> tuple[int, str]:
+    """Validate a submitted device/system pair against the devices present now."""
+    devices = await tsduck_service.list_devices()
+    chosen = resolve_device(devices, adapter=adapter, delivery_system=delivery_system)
+    return chosen.index, delivery_system
 
 
 @app.post("/api/analyze", response_class=HTMLResponse)
@@ -154,13 +175,16 @@ async def analyze_mux(request: Request):
     try:
         frequency = _form_int(form, "frequency", 674000000)
         bandwidth = _form_int(form, "bandwidth", 8)
-        # Adapter 0 is the DVB-T tuner on a WinTV-soloHD; that is the only
-        # capture path verified end to end.
         adapter = _form_int(form, "adapter", 0)
         duration = _form_int(form, "analysis_duration", 10)
     except InvalidFormField as error:
         return invalid_field_response(error)
     delivery_system = str(form.get("delivery_system", "DVB-T"))
+
+    try:
+        adapter, delivery_system = await _resolve_device(adapter, delivery_system)
+    except DeviceSelectionError as error:
+        return invalid_field_response(error)
 
     mux_info = await tsduck_service.analyze_mux(
         frequency=frequency,
@@ -197,6 +221,11 @@ async def start_recording(request: Request):
     except InvalidFormField as error:
         return invalid_field_response(error)
     delivery_system = str(form.get("delivery_system", "DVB-T"))
+
+    try:
+        adapter, delivery_system = await _resolve_device(adapter, delivery_system)
+    except DeviceSelectionError as error:
+        return invalid_field_response(error)
 
     try:
         recording = await tsduck_service.start_recording(

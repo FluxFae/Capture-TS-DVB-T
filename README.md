@@ -68,8 +68,12 @@ Capture-TS is developed and verified against one concrete setup:
 - Windows 11, Python 3.12, TSDuck `3.43-4549`
 
 The DVB-T2 and DVB-C paths that this hybrid receiver also exposes are **not** verified.
-The device list is whatever `tslsdvb` reports, and the app passes your delivery-system
-selection straight through to `tsp`, so treat other systems as untested.
+The device list is whatever `tslsdvb` reports: this stick exposes a DVB-T tuner as
+device `0` and a DVB-C tuner as device `1`. The form preselects the DVB-T device and
+only offers the delivery systems the selected device reports, so picking the DVB-C
+tuner exposes `DVB-C` / `DVB-C/C` instead of sending an incompatible system to `tsp`.
+The DVB-C tuner was confirmed to reach `tsp` and tune, but no cable signal was
+available, so DVB-C reception itself is untested.
 
 Signal lock takes several seconds on this hardware. Recording duration is therefore
 counted from the first byte written to the file, not from the moment the recorder
