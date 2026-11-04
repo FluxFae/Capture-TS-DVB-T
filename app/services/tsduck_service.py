@@ -45,6 +45,10 @@ class DVBDevice:
 # is the one the UI preselects whenever a receiver reports it.
 VERIFIED_DELIVERY_SYSTEM = "DVB-T"
 
+# Captures belong to the project, not to the directory the process happens to
+# be started from: resolve them from this file, never from the working dir.
+DEFAULT_RECORDINGS_DIR = Path(__file__).resolve().parents[2] / "recordings"
+
 
 class DeviceSelectionError(ValueError):
     """Raised when the submitted receiver device or delivery system is unusable."""
@@ -168,17 +172,23 @@ class TSDuckService:
 
     def __init__(
         self,
-        recordings_dir: str = "recordings",
+        recordings_dir: str | Path | None = None,
         poll_interval: float = 0.5,
     ):
         """Create the service.
+
+        ``recordings_dir`` defaults to ``recordings/`` next to the project, not
+        next to whatever directory the process was started from: a relative
+        default silently wrote captures somewhere else and left the library
+        listing a different folder. An explicit directory is still honoured
+        as given and resolved to an absolute path.
 
         ``poll_interval`` is how often the recording monitor polls the tsp
         process and the output file. The soloHD class tuners need several
         seconds to lock, so this interval affects responsiveness only.
         """
-        self.recordings_dir = Path(recordings_dir)
-        self.recordings_dir.mkdir(exist_ok=True)
+        self.recordings_dir = Path(recordings_dir or DEFAULT_RECORDINGS_DIR).resolve()
+        self.recordings_dir.mkdir(parents=True, exist_ok=True)
         self.poll_interval = poll_interval
 
         self._current_recording: RecordingInfo | None = None

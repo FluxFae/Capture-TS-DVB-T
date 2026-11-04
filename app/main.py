@@ -30,7 +30,8 @@ from app.version import APP_VERSION
 # Application state
 # ──────────────────────────────────────────────
 
-tsduck_service = TSDuckService(recordings_dir="recordings")
+# Recordings live next to the project, wherever the app is started from.
+tsduck_service = TSDuckService()
 connected_websockets: set[WebSocket] = set()
 _main_loop: asyncio.AbstractEventLoop | None = None
 
