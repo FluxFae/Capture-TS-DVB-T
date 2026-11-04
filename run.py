@@ -4,6 +4,8 @@ import os
 
 import uvicorn
 
+from app.main import WS_IMPLEMENTATION
+
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
@@ -11,4 +13,5 @@ if __name__ == "__main__":
         port=8000,
         reload=os.getenv("CAPTURE_TS_RELOAD", "false").lower() == "true",
         log_level="info",
+        ws=WS_IMPLEMENTATION,
     )

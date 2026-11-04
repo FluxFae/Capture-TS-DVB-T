@@ -14,8 +14,29 @@ import unittest
 
 import uvicorn
 import websockets
+from uvicorn.config import WS_PROTOCOLS
 
 import app.main as app_main
+
+
+class WebSocketImplementationTest(unittest.TestCase):
+    """The server must not run on an API deprecated since websockets 14.
+
+    uvicorn's ``auto`` resolves to the legacy implementation whenever the
+    package is installed, which printed three DeprecationWarnings and will stop
+    working when that API is removed. The name configured by the app has to map
+    to the current implementation.
+    """
+
+    def test_the_configured_implementation_is_the_current_one(self):
+        # WS_PROTOCOLS values are "module:Class" strings, or None for "none".
+        resolved = WS_PROTOCOLS.get(app_main.WS_IMPLEMENTATION) or ""
+
+        self.assertIn(
+            "websockets_sansio_impl",
+            resolved,
+            f"{app_main.WS_IMPLEMENTATION!r} does not resolve to the current implementation",
+        )
 
 
 def free_port():
@@ -33,6 +54,7 @@ class LiveUpdateTestCase(unittest.IsolatedAsyncioTestCase):
             port=self.port,
             log_level="error",
             lifespan="on",
+            ws=app_main.WS_IMPLEMENTATION,
         )
         self.server = uvicorn.Server(config)
         self.server_task = asyncio.create_task(self.server.serve())

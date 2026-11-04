@@ -97,6 +97,12 @@ async def lifespan(app: FastAPI):
 # FastAPI app
 # ──────────────────────────────────────────────
 
+# uvicorn's "auto" resolves to the legacy websockets implementation whenever the
+# package is installed, and that implementation has been deprecated since
+# websockets 14. Name the current one explicitly so the app (and the tests) run
+# on the supported API instead of printing deprecation noise.
+WS_IMPLEMENTATION = "websockets-sansio"
+
 app = FastAPI(
     title="Capture-TS",
     description="DVB-T Transport Stream Recorder",
