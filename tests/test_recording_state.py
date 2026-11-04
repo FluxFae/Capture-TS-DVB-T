@@ -16,11 +16,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from app.services.tsduck_service import (
-    NoServicesSelectedError,
-    RecordingState,
-    TSDuckService,
-)
+from app.services.tsduck_service import (NoServicesSelectedError,
+                                         RecordingState, TSDuckService)
 
 
 class SlowStderr:

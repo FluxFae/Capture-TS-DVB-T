@@ -20,8 +20,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
-import tsduck
-
 # A normalized record is a list of ``key=value`` fields joined by ':'. Only a
 # colon that is immediately followed by a lowercase key and '=' separates
 # fields; any other colon belongs to the value (e.g. a NIT description).

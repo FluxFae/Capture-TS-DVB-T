@@ -1,1 +1,1 @@
-# Capture-TS: DVB-T Transport Stream Recorder
+"""Capture-TS: DVB-T Transport Stream Recorder."""

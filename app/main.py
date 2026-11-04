@@ -12,21 +12,19 @@ from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData
 
-from app.services.tsduck_service import (
-    DeviceSelectionError,
-    NoServicesSelectedError,
-    TSDuckService,
-    available_delivery_systems,
-    default_delivery_system,
-    default_device,
-    resolve_device,
-)
+from app.services.tsduck_service import (DeviceSelectionError,
+                                         NoServicesSelectedError,
+                                         TSDuckService,
+                                         available_delivery_systems,
+                                         default_delivery_system,
+                                         default_device, resolve_device)
+from app.version import APP_VERSION
 
 # ──────────────────────────────────────────────
 # Application state
@@ -89,13 +87,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Capture-TS",
     description="DVB-T Transport Stream Recorder",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+# Available to every template, so the footer never hardcodes a version.
+templates.env.globals["app_version"] = APP_VERSION
 
 
 # ──────────────────────────────────────────────
@@ -343,7 +343,6 @@ async def websocket_endpoint(ws: WebSocket):
             if msg.get("type") == "ping":
                 await ws.send_text(json.dumps({"type": "pong"}))
 
-    except WebSocketDisconnect:
-        connected_websockets.discard(ws)
     except Exception:
+        # WebSocketDisconnect included: either way this peer is gone.
         connected_websockets.discard(ws)
