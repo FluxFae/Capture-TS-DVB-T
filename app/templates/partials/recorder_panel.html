@@ -6,6 +6,7 @@
 {%- set duration_value = (current_recording.duration_limit or 0) if current_recording else 0 -%}
 {%- set checked_full = 'checked' if mode == 'full_mux' else '' -%}
 {%- set checked_selected = 'checked' if mode == 'selected' else '' -%}
+{%- set live_target = (current_recording.duration_limit or '') if current_recording else '' -%}
 {% if recording_state == 'error' and current_recording and current_recording.last_error %}
 <div class="flux-alert flux-alert--error" id="recorder-error">
     <i data-lucide="alert-triangle" class="flux-icon"></i>
@@ -59,29 +60,23 @@
 {% endif %}
 </form>
 
-{% if recording_state == 'recording' %}
-<div class="flux-record-summary flux-record-summary--live">
+{% if recording_state == 'tuning' or recording_state == 'recording' %}
+{#- The panel is not redrawn while a capture runs, so this block carries the
+    hooks app.js updates from the WebSocket telemetry (-1s invented state is
+    worse than no state). -#}
+<div class="flux-record-summary flux-record-summary--live" data-target="{{ live_target }}">
     <span class="flux-rec-pulse"></span>
     <div>
-        <strong>Recording</strong>
-        <span class="flux-text--muted">
-            {{ current_recording.services_filter|length if current_recording and current_recording.services_filter else 'Full mux' }}
-            —
-            {% if current_recording and current_recording.duration_limit %}
-            {{ current_recording.duration_limit }}s target,
-            {{ current_recording.duration_seconds|int }}s captured
+        <strong id="live-title">{% if recording_state == 'tuning' %}Starting recording…{% else %}Recording{% endif %}</strong>
+        <span class="flux-text--muted" id="live-detail">
+            {% if recording_state == 'tuning' %}
+            Waiting for the first data…
+            {% elif live_target %}
+            {{ live_target }}s target, {{ current_recording.duration_seconds|int }}s captured
             {% else %}
-            {{ current_recording.duration_seconds|int if current_recording else 0 }}s captured, no limit
+            {{ current_recording.duration_seconds|int }}s captured, no limit
             {% endif %}
         </span>
-    </div>
-</div>
-{% elif recording_state == 'tuning' %}
-<div class="flux-record-summary flux-record-summary--live">
-    <span class="flux-rec-pulse"></span>
-    <div>
-        <strong>Recording</strong>
-        <span class="flux-text--muted">Waiting for signal lock…</span>
     </div>
 </div>
 {% endif %}

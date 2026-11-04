@@ -120,12 +120,33 @@ class ProgressMessageTest(unittest.TestCase):
         self.assertIn("Recording", html)
         self.assertIn("120", html)
 
-    def test_tuning_is_announced_too(self):
+    def test_tuning_says_starting_not_a_technical_claim(self):
+        # "Waiting for signal lock" stayed on screen for the whole capture,
+        # because the panel is only redrawn on start and stop. While tuning the
+        # honest wording is "starting", and the technical detail belongs to the
+        # system log.
         recording = make_recording(duration_limit=30)
 
         html, _ = render_panel(RecordingState.TUNING, recording)
 
-        self.assertIn("Recording", html)
+        self.assertIn("Starting recording", html)
+        self.assertNotIn("signal lock", html.lower())
+
+    def test_live_block_exposes_hooks_for_the_client_to_update(self):
+        recording = make_recording(services_filter=[101], duration_limit=120)
+
+        html, _ = render_panel(RecordingState.RECORDING, recording)
+
+        self.assertIn('data-target="120"', html)
+        self.assertIn('id="live-title"', html)
+        self.assertIn('id="live-detail"', html)
+
+    def test_live_block_without_a_limit_exposes_an_empty_target(self):
+        recording = make_recording()
+
+        html, _ = render_panel(RecordingState.RECORDING, recording)
+
+        self.assertIn('data-target=""', html)
 
     def test_an_idle_panel_does_not_claim_to_be_recording(self):
         recording = make_recording(services_filter=[101], duration_limit=30, file_size_bytes=1024, duration_seconds=30)

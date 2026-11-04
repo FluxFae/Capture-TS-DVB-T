@@ -78,6 +78,34 @@ let lastFileSize = 0;
 let lastUpdateTime = Date.now();
 let lastKnownState = 'IDLE';
 
+// The recorder panel is only redrawn when a capture starts or stops, so the
+// "recording…" line is kept honest here: it switches from "starting" to the
+// live counter on the first locked state and then follows the telemetry.
+function updateRecorderLive(data) {
+    const live = document.querySelector('.flux-record-summary--live');
+    if (!live) return;
+
+    const title = live.querySelector('#live-title');
+    const detail = live.querySelector('#live-detail');
+    if (!title || !detail) return;
+
+    const state = (data.state || 'idle').toLowerCase();
+    if (state !== 'recording' && state !== 'tuning') return;
+
+    if (state === 'tuning') {
+        title.textContent = 'Starting recording…';
+        detail.textContent = 'Waiting for the first data…';
+        return;
+    }
+
+    const target = live.dataset.target ? Number(live.dataset.target) : 0;
+    const captured = Math.floor(Number(data.duration || 0));
+    title.textContent = 'Recording';
+    detail.textContent = target
+        ? `${target}s target, ${captured}s captured`
+        : `${captured}s captured, no limit`;
+}
+
 function updateTelemetry(data) {
     const stateEl = document.getElementById('metric-state');
     const sizeEl = document.getElementById('metric-filesize');
@@ -109,6 +137,8 @@ function updateTelemetry(data) {
             stateEl.style.color = '';
         }
     }
+
+    updateRecorderLive(data);
 
     if (sizeEl && data.file_size_display) {
         sizeEl.textContent = data.file_size_display;
