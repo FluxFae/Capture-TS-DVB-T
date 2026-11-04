@@ -23,6 +23,12 @@ from typing import Any, Callable
 import tsduck
 
 
+# A normalized record is a list of ``key=value`` fields joined by ':'. Only a
+# colon that is immediately followed by a lowercase key and '=' separates
+# fields; any other colon belongs to the value (e.g. a NIT description).
+_NORMALIZED_FIELD_SEPARATOR = re.compile(r":(?=[a-z][a-z0-9_]*=)")
+
+
 class RecordingState(str, Enum):
     IDLE = "idle"
     TUNING = "tuning"
@@ -257,7 +263,16 @@ class TSDuckService:
         # Join continuation lines (lines that don't start with a known prefix
         # are continuations of the previous line, e.g. multi-word service names)
         joined_lines = []
-        known_prefixes = ("ts:", "service:", "pid:", "time:", "table:")
+        known_prefixes = (
+            "ts:",
+            "service:",
+            "pid:",
+            "time:",
+            "table:",
+            "global:",
+            "unreferenced:",
+            "title:",
+        )
         for raw_line in output.split("\n"):
             stripped = raw_line.strip()
             if not stripped:
@@ -275,6 +290,7 @@ class TSDuckService:
             if line.startswith("ts:"):
                 ts_id = self._parse_int(parts.get("id", "0"))
                 total_bitrate = self._parse_int(parts.get("bitrate", "0"))
+                country_code = parts.get("country", "")
 
             # Service entries: service:id=101:tsid=901:orignetwid=272:...
             elif line.startswith("service:"):
@@ -314,6 +330,11 @@ class TSDuckService:
                     if match:
                         network_name = match.group(1).strip().rstrip(")")
 
+            # Country code: the ts line carries it, the TOT lines repeat it.
+            elif line.startswith("time:"):
+                if not country_code and parts.get("country"):
+                    country_code = parts["country"]
+
         # If we didn't parse normalized output well, try the table format
         if not services:
             services, ts_id, onid, network_name, country_code, total_bitrate = (
@@ -341,25 +362,33 @@ class TSDuckService:
 
         The first segment is the record type (ts, service, pid, etc.).
         Remaining segments are key=value pairs separated by ':'.
-        The last key (often 'name' or 'description') may contain spaces.
+
+        A value may legitimately contain a colon, because the NIT description
+        reads ``NIT (Network: 0x3001 (12289) Mediaset1)``. Only a colon that
+        introduces a new ``key=`` field is a separator, so the split has to
+        look ahead at what follows it instead of taking every colon.
         """
-        parts = {}
-        # Split on ':' — first element is the record type prefix
-        segments = line.split(":")
-        if len(segments) < 2:
+        parts: dict[str, str] = {}
+        _, separator, rest = line.partition(":")
+        if not separator:
             return parts
 
-        # Skip first segment (record type like "ts", "service", "pid")
-        for segment in segments[1:]:
-            if "=" in segment:
-                key, _, value = segment.partition("=")
-                key = key.strip()
-                value = value.strip()
-                # If we already have this key, append (handles continuation)
-                if key in parts:
-                    parts[key] = parts[key] + ":" + value
-                else:
-                    parts[key] = value
+        # Records may end with an extra ':' (the ts line does, the pid lines do
+        # not) and that trailing colon is punctuation, not part of the value.
+        if rest.endswith(":"):
+            rest = rest[:-1]
+
+        for segment in _NORMALIZED_FIELD_SEPARATOR.split(rest):
+            key, equals, value = segment.partition("=")
+            if not equals:
+                continue
+            key = key.strip()
+            value = value.strip()
+            # If we already have this key, append (handles continuation)
+            if key in parts:
+                parts[key] = parts[key] + ":" + value
+            else:
+                parts[key] = value
 
         return parts
 
