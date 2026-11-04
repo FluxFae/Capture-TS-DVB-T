@@ -67,6 +67,19 @@ def sync_state_callback(state: dict) -> None:
         asyncio.run_coroutine_threadsafe(broadcast_state(state), _main_loop)
 
 
+async def shutdown_recordings(service: tsduck.TSDuckService | None = None) -> None:
+    """Stop a capture that is still running, so tsp cannot outlive the server.
+
+    On Windows a child process survives its parent: closing the terminal in the
+    middle of a capture left ``tsp`` writing to disk with nobody watching, and
+    nothing in the UI could stop it. The lifespan calls this on shutdown.
+    """
+    target = service or tsduck_service
+    if target.state is tsduck.RecordingState.IDLE:
+        return
+    await target.stop_recording()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
@@ -74,7 +87,10 @@ async def lifespan(app: FastAPI):
     _main_loop = asyncio.get_running_loop()
     tsduck_service.set_log_callback(sync_log_callback)
     tsduck_service.set_state_callback(sync_state_callback)
-    yield
+    try:
+        yield
+    finally:
+        await shutdown_recordings()
 
 
 # ──────────────────────────────────────────────
