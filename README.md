@@ -60,6 +60,32 @@ Capture-TS is a lightweight web-based DVB-T transport stream capture and recordi
 
 5. Open your browser at `http://127.0.0.1:8000`
 
+## ✅ Verified Configuration
+
+Capture-TS is developed and verified against one concrete setup:
+
+- Hauppauge WinTV-soloHD, **DVB-T** tuner (device index `0`), 8 MHz muxes
+- Windows 11, Python 3.12, TSDuck `3.43-4549`
+
+The DVB-T2 and DVB-C paths that this hybrid receiver also exposes are **not** verified.
+The device list is whatever `tslsdvb` reports, and the app passes your delivery-system
+selection straight through to `tsp`, so treat other systems as untested.
+
+Signal lock takes several seconds on this hardware. Recording duration is therefore
+counted from the first byte written to the file, not from the moment the recorder
+starts, and a capture that never receives data ends in an error instead of an empty
+file reported as a success.
+
+## 🧪 Tests
+
+The suite uses the Python standard library only (nothing extra to install) and does
+not need a tuner: `subprocess.Popen` is replaced by a fake `tsp` process, and the
+WebSocket tests run against a real in-process server.
+
+```bash
+venv\Scripts\python.exe -m unittest discover -s tests -t . -v
+```
+
 ## ⚙️ Tech Stack
 
 - **Backend**: Python 3.12, FastAPI, Jinja2
