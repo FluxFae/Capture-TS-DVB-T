@@ -18,12 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData
 
-from app.services.tsduck_service import (DeviceSelectionError,
-                                         NoServicesSelectedError,
-                                         TSDuckService,
-                                         available_delivery_systems,
-                                         default_delivery_system,
-                                         default_device, resolve_device)
+from app.services import devices
+from app.services import tsduck_service as tsduck
 from app.version import APP_VERSION
 
 # ──────────────────────────────────────────────
@@ -31,7 +27,7 @@ from app.version import APP_VERSION
 # ──────────────────────────────────────────────
 
 # Recordings live next to the project, wherever the app is started from.
-tsduck_service = TSDuckService()
+tsduck_service = tsduck.TSDuckService()
 connected_websockets: set[WebSocket] = set()
 _main_loop: asyncio.AbstractEventLoop | None = None
 
@@ -106,17 +102,17 @@ templates.env.globals["app_version"] = APP_VERSION
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """Main dashboard page."""
-    devices = await tsduck_service.list_devices()
+    available = await tsduck_service.list_devices()
     recordings = await tsduck_service.list_recordings()
-    selected_device = default_device(devices)
+    selected_device = devices.default_device(available)
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
         context={
-            "devices": devices,
+            "devices": available,
             "selected_adapter": selected_device.index if selected_device else -1,
-            "delivery_systems": available_delivery_systems(devices),
-            "selected_system": default_delivery_system(selected_device),
+            "delivery_systems": devices.available_delivery_systems(available),
+            "selected_system": devices.default_delivery_system(selected_device),
             "recordings": recordings,
             "recording_state": tsduck_service.state.value,
             "current_recording": tsduck_service.current_recording,
@@ -166,8 +162,8 @@ async def _resolve_device(
     delivery_system: str,
 ) -> tuple[int, str]:
     """Validate a submitted device/system pair against the devices present now."""
-    devices = await tsduck_service.list_devices()
-    chosen = resolve_device(devices, adapter=adapter, delivery_system=delivery_system)
+    available = await tsduck_service.list_devices()
+    chosen = devices.resolve_device(available, adapter=adapter, delivery_system=delivery_system)
     return chosen.index, delivery_system
 
 
@@ -186,7 +182,7 @@ async def analyze_mux(request: Request):
 
     try:
         adapter, delivery_system = await _resolve_device(adapter, delivery_system)
-    except DeviceSelectionError as error:
+    except devices.DeviceSelectionError as error:
         return invalid_field_response(error)
 
     mux_info = await tsduck_service.analyze_mux(
@@ -230,7 +226,7 @@ async def start_recording(request: Request):
 
     try:
         adapter, delivery_system = await _resolve_device(adapter, delivery_system)
-    except DeviceSelectionError as error:
+    except devices.DeviceSelectionError as error:
         return invalid_field_response(error)
 
     try:
@@ -250,7 +246,7 @@ async def start_recording(request: Request):
                 "current_recording": recording,
             },
         )
-    except NoServicesSelectedError as error:
+    except tsduck.NoServicesSelectedError as error:
         return invalid_field_response(error)
     except RuntimeError as e:
         return HTMLResponse(
