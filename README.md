@@ -80,6 +80,11 @@ counted from the first byte written to the file, not from the moment the recorde
 starts, and a capture that never receives data ends in an error instead of an empty
 file reported as a success.
 
+The capture mode decides what lands in the file: *full mux* records the whole
+multiplex and ignores the service checkboxes, while *selected services* records only
+the ticked ones. Selecting that mode with nothing ticked is refused rather than
+silently falling back to the full mux.
+
 ## 🧪 Tests
 
 The suite uses the Python standard library only (nothing extra to install) and does

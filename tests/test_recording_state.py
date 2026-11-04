@@ -16,7 +16,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from app.services.tsduck_service import RecordingState, TSDuckService
+from app.services.tsduck_service import (
+    NoServicesSelectedError,
+    RecordingState,
+    TSDuckService,
+)
 
 
 class SlowStderr:
@@ -338,6 +342,62 @@ class RecordingsLibraryTest(RecordingStateTestCase):
 
         listed = asyncio.run(service.list_recordings())
         self.assertEqual([item["filename"] for item in listed], ["a.ts"])
+
+class ServiceFilterTest(RecordingStateTestCase):
+    """M4: a service filter that names no service must never fall back to the mux.
+
+    Unchecking every service and pressing record used to record the whole mux,
+    because ``service_ids`` was empty and the filter was simply dropped. That is
+    the opposite of what the mode promises, and it fills the disk silently.
+    """
+
+    def test_selected_mode_without_services_is_rejected(self):
+        popen = fake_tsp(data_after=0.1, exit_after=1.0)
+        service = self.make_service()
+
+        import asyncio
+
+        with (
+            mock.patch("app.services.tsduck_service.subprocess.Popen", popen),
+            self.assertRaises(NoServicesSelectedError) as caught,
+        ):
+            asyncio.run(self.start(service, service_ids=[]))
+
+        self.assertIn("full mux", str(caught.exception))
+        self.assertIsNone(popen.last, "tsp was started for an empty selection")
+        self.assertIsNone(service._recording_thread)
+        self.assertEqual(service.state, RecordingState.IDLE)
+        self.assertEqual(list(Path(self.tmpdir).glob("*.ts")), [])
+
+    def test_selected_services_reach_the_zap_plugin(self):
+        popen = fake_tsp(data_after=0.1, exit_after=1.0)
+        service = self.make_service()
+
+        import asyncio
+
+        with mock.patch("app.services.tsduck_service.subprocess.Popen", popen):
+            asyncio.run(self.start(service, service_ids=[101, 102]))
+            self.wait_for_thread(service)
+
+        self.assertIsNotNone(popen.last)
+        argv = popen.last.argv  # type: ignore[union-attr]
+        zap_at = argv.index("zap")
+        self.assertEqual(argv[zap_at - 1], "-P")
+        self.assertEqual(argv[zap_at + 1:zap_at + 3], ["101", "102"])
+        self.assertIn("--no-ecm", argv)
+
+    def test_full_mux_records_without_a_zap_plugin(self):
+        popen = fake_tsp(data_after=0.1, exit_after=1.0)
+        service = self.make_service()
+
+        import asyncio
+
+        with mock.patch("app.services.tsduck_service.subprocess.Popen", popen):
+            asyncio.run(self.start(service, service_ids=None))
+            self.wait_for_thread(service)
+
+        self.assertIsNotNone(popen.last)
+        self.assertNotIn("zap", popen.last.argv)  # type: ignore[union-attr]
 
 
 if __name__ == "__main__":

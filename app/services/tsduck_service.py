@@ -52,6 +52,10 @@ class DeviceSelectionError(ValueError):
     """Raised when the submitted receiver device or delivery system is unusable."""
 
 
+class NoServicesSelectedError(ValueError):
+    """Raised when a service filter is requested but names no service."""
+
+
 def default_device(devices: list[DVBDevice]) -> DVBDevice | None:
     """Choose the device to preselect in the form.
 
@@ -593,7 +597,19 @@ class TSDuckService:
         duration_seconds: int | None = None,
         filename: str | None = None,
     ) -> RecordingInfo:
-        """Start recording a transport stream."""
+        """Start recording a transport stream.
+
+        ``service_ids`` distinguishes the two recording modes: ``None`` records
+        the full mux, a non-empty list records only those services, and an
+        empty list is rejected because "selected services" with nothing
+        selected must never quietly turn into a full-mux capture.
+        """
+        if service_ids is not None and not service_ids:
+            raise NoServicesSelectedError(
+                "No services selected — tick at least one service, "
+                "or switch the capture mode to full mux"
+            )
+
         if self.state in (
             RecordingState.TUNING,
             RecordingState.RECORDING,
@@ -637,7 +653,7 @@ class TSDuckService:
         ]
 
         # Service filtering with zap plugin
-        if service_ids and len(service_ids) > 0:
+        if service_ids:
             # The 'zap' plugin supports multiple services natively and correctly
             # rewrites PAT/SDT to create a compliant output TS.
             cmd.extend(["-P", "zap"])

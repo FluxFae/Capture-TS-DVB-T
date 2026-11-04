@@ -6,6 +6,7 @@ Design: Flux Design System (dark-first, burgundy/magenta brand)
 """
 
 import asyncio
+import contextlib
 import json
 from contextlib import asynccontextmanager
 from html import escape
@@ -19,6 +20,7 @@ from starlette.datastructures import FormData
 
 from app.services.tsduck_service import (
     DeviceSelectionError,
+    NoServicesSelectedError,
     TSDuckService,
     available_delivery_systems,
     default_delivery_system,
@@ -211,8 +213,11 @@ async def start_recording(request: Request):
         adapter = _form_int(form, "adapter", 0)
         # Duration (0 or empty = unlimited)
         duration = _form_int(form, "duration", 0) or None
-        service_ids: list[int] = []
+        # None means "full mux"; an empty list means "selected, but nothing is
+        # ticked", which start_recording refuses instead of recording everything.
+        service_ids: list[int] | None = None
         if form.get("record_mode", "full_mux") == "selected":
+            service_ids = []
             for raw in form.getlist("selected_services"):
                 try:
                     service_ids.append(int(str(raw)))
@@ -244,9 +249,11 @@ async def start_recording(request: Request):
                 "current_recording": recording,
             },
         )
+    except NoServicesSelectedError as error:
+        return invalid_field_response(error)
     except RuntimeError as e:
         return HTMLResponse(
-            f'<div class="flux-alert flux-alert--error">{e}</div>',
+            f'<div class="flux-alert flux-alert--error">{escape(str(e))}</div>',
             status_code=400,
         )
 
@@ -321,13 +328,11 @@ async def websocket_endpoint(ws: WebSocket):
     connected_websockets.add(ws)
 
     # Send initial state
-    try:
+    with contextlib.suppress(Exception):
         await ws.send_text(json.dumps({
             "type": "state",
             **tsduck_service._get_recording_status(),
         }))
-    except Exception:
-        pass
 
     try:
         while True:
