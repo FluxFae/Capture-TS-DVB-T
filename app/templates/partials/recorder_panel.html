@@ -1,4 +1,11 @@
 <form id="recorder-form">
+{#- The panel is redrawn every time a capture starts or stops, so the
+    selections are read from the recording that is running (or ran last)
+    instead of being reset to the template defaults. -#}
+{%- set mode = 'selected' if current_recording and current_recording.services_filter else 'full_mux' -%}
+{%- set duration_value = (current_recording.duration_limit or 0) if current_recording else 0 -%}
+{%- set checked_full = 'checked' if mode == 'full_mux' else '' -%}
+{%- set checked_selected = 'checked' if mode == 'selected' else '' -%}
 {% if recording_state == 'error' and current_recording and current_recording.last_error %}
 <div class="flux-alert flux-alert--error" id="recorder-error">
     <i data-lucide="alert-triangle" class="flux-icon"></i>
@@ -11,13 +18,11 @@
     <label class="flux-label">CAPTURE MODE</label>
     <div class="flux-radio-group">
         <label class="flux-radio-label">
-            <input type="radio" name="record_mode" value="full_mux" checked class="flux-radio"
-                   onchange="toggleServiceSelection(this)">
+            <input type="radio" name="record_mode" value="full_mux" class="flux-radio" {{ checked_full }} onchange="toggleServiceSelection(this)">
             <span>Full Mux</span>
         </label>
         <label class="flux-radio-label">
-            <input type="radio" name="record_mode" value="selected" class="flux-radio"
-                   onchange="toggleServiceSelection(this)">
+            <input type="radio" name="record_mode" value="selected" class="flux-radio" {{ checked_selected }} onchange="toggleServiceSelection(this)">
             <span>Selected Services</span>
         </label>
     </div>
@@ -28,7 +33,7 @@
     <label class="flux-label" for="duration">DURATION (seconds, 0 = unlimited)</label>
     <input type="number" class="flux-input flux-input--mono"
            name="duration" id="duration"
-           value="0" min="0" step="10">
+           value="{{ duration_value }}" min="0" step="10">
 </div>
 
 <!-- Record / Stop Button -->
@@ -53,6 +58,33 @@
 </button>
 {% endif %}
 </form>
+
+{% if recording_state == 'recording' %}
+<div class="flux-record-summary flux-record-summary--live">
+    <span class="flux-rec-pulse"></span>
+    <div>
+        <strong>Recording</strong>
+        <span class="flux-text--muted">
+            {{ current_recording.services_filter|length if current_recording and current_recording.services_filter else 'Full mux' }}
+            —
+            {% if current_recording and current_recording.duration_limit %}
+            {{ current_recording.duration_limit }}s target,
+            {{ current_recording.duration_seconds|int }}s captured
+            {% else %}
+            {{ current_recording.duration_seconds|int if current_recording else 0 }}s captured, no limit
+            {% endif %}
+        </span>
+    </div>
+</div>
+{% elif recording_state == 'tuning' %}
+<div class="flux-record-summary flux-record-summary--live">
+    <span class="flux-rec-pulse"></span>
+    <div>
+        <strong>Recording</strong>
+        <span class="flux-text--muted">Waiting for signal lock…</span>
+    </div>
+</div>
+{% endif %}
 
 {% if current_recording and recording_state == 'idle' and current_recording.file_size_bytes > 0 %}
 <div class="flux-record-summary">

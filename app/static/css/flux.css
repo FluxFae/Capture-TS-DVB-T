@@ -334,6 +334,12 @@ html:not(.dark) {
 }
 .flux-record-summary strong { display: block; font-family: var(--font-mono); font-size: 12px; }
 
+/* A capture in progress says so, in the recording colour, not the success one */
+.flux-record-summary--live {
+  background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.25);
+}
+.flux-record-summary--live .flux-rec-pulse { background: var(--flux-error); }
+
 /* ── Recording progress bar ── */
 .flux-record-progress { margin-top: var(--space-lg); }
 .flux-record-progress__bar {

@@ -16,8 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from app.services.tsduck_service import (NoServicesSelectedError,
-                                         RecordingState, TSDuckService)
+from app.services import tsduck_service as tsduck
 
 
 class SlowStderr:
@@ -100,7 +99,7 @@ class RecordingStateTestCase(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(self.tmpdir, ignore_errors=True))
 
     def make_service(self):
-        service = TSDuckService(recordings_dir=self.tmpdir, poll_interval=0.02)
+        service = tsduck.TSDuckService(recordings_dir=self.tmpdir, poll_interval=0.02)
         self.logs = []
         self.states = []
         service.set_log_callback(self.logs.append)
@@ -146,7 +145,7 @@ class DurationStartsAtSignalLockTest(RecordingStateTestCase):
         info = service.current_recording
         self.assertIsNotNone(info)
         assert info is not None
-        self.assertEqual(service.state, RecordingState.IDLE)
+        self.assertEqual(service.state, tsduck.RecordingState.IDLE)
         self.assertGreater(info.file_size_bytes, 0, "recording ended with zero bytes")
         # ~0.3s of recording starting 0.6s after launch, not 0.9s of lifetime.
         self.assertGreaterEqual(info.duration_seconds, 0.25)
@@ -197,7 +196,7 @@ class FailureSurfacingTest(RecordingStateTestCase):
         info = service.current_recording
         self.assertIsNotNone(info)
         assert info is not None
-        self.assertEqual(service.state, RecordingState.ERROR)
+        self.assertEqual(service.state, tsduck.RecordingState.ERROR)
         self.assertIn("no input DVB signal", info.last_error)
         logs = self.log_text()
         self.assertNotIn("Recording stopped", logs, "reported success for an empty capture")
@@ -217,7 +216,7 @@ class FailureSurfacingTest(RecordingStateTestCase):
         info = service.current_recording
         self.assertIsNotNone(info)
         assert info is not None
-        self.assertEqual(service.state, RecordingState.ERROR)
+        self.assertEqual(service.state, tsduck.RecordingState.ERROR)
         self.assertTrue(info.last_error, "no error message recorded")
 
     def test_real_stderr_message_wins_over_generic_fallback(self):
@@ -271,7 +270,7 @@ class StopDuringTuningTest(RecordingStateTestCase):
         async def scenario():
             await self.start(service)
             await asyncio.sleep(0.05)
-            self.assertEqual(service.state, RecordingState.TUNING)
+            self.assertEqual(service.state, tsduck.RecordingState.TUNING)
             stopped = await service.stop_recording()
             return stopped
 
@@ -282,8 +281,8 @@ class StopDuringTuningTest(RecordingStateTestCase):
         self.assertIsNotNone(stopped, "stop during tuning was ignored")
         self.assertIsNotNone(popen.last)
         self.assertTrue(popen.last.terminated, "tsp process was left running")  # type: ignore[union-attr]
-        self.assertNotEqual(service.state, RecordingState.STOPPING)
-        self.assertNotEqual(service.state, RecordingState.TUNING)
+        self.assertNotEqual(service.state, tsduck.RecordingState.STOPPING)
+        self.assertNotEqual(service.state, tsduck.RecordingState.TUNING)
         final = service.current_recording
         self.assertIsNotNone(final)
         assert final is not None
@@ -296,7 +295,7 @@ class StopDuringTuningTest(RecordingStateTestCase):
         import asyncio
 
         self.assertIsNone(asyncio.run(service.stop_recording()))
-        self.assertEqual(service.state, RecordingState.IDLE)
+        self.assertEqual(service.state, tsduck.RecordingState.IDLE)
 
     def test_second_start_is_rejected(self):
         popen = fake_tsp(data_after=None, exit_after=None)
@@ -340,6 +339,64 @@ class RecordingsLibraryTest(RecordingStateTestCase):
         listed = asyncio.run(service.list_recordings())
         self.assertEqual([item["filename"] for item in listed], ["a.ts"])
 
+class FilteredCaptureFailureTest(RecordingStateTestCase):
+    """A filter that matches nothing must not be reported as a success.
+
+    ``tsp`` exits **0** after writing only the tables when ``zap`` cannot find
+    the requested services, so a 188-byte file was presented as a finished
+    capture. The rule: a payload smaller than the floor, together with a tsp
+    error, is a failure and the artifact is discarded.
+    """
+
+    ZAP_ERROR = "* Error: zap: service 101 not found in PAT"
+
+
+    def test_a_filtered_capture_without_payload_is_an_error(self):
+        popen = fake_tsp(
+            data_after=0.05,
+            payload=b"x" * 188,
+            exit_after=0.3,
+            exit_code=0,
+            stderr_text=self.ZAP_ERROR,
+        )
+        service = self.make_service()
+
+        import asyncio
+
+        with mock.patch("app.services.tsduck_service.subprocess.Popen", popen):
+            asyncio.run(self.start(service, service_ids=[101, 102, 103]))
+            self.wait_for_thread(service)
+
+        info = service.current_recording
+        self.assertIsNotNone(info)
+        assert info is not None
+        self.assertEqual(service.state, tsduck.RecordingState.ERROR)
+        self.assertIn("not found in PAT", info.last_error)
+        self.assertEqual(list(Path(self.tmpdir).glob("*.ts")), [], "kept a table-only artifact")
+
+    def test_a_tsp_error_after_real_payload_keeps_the_file(self):
+        popen = fake_tsp(
+            data_after=0.05,
+            payload=b"x" * 200_000,
+            exit_after=0.3,
+            exit_code=0,
+            stderr_text=self.ZAP_ERROR,
+        )
+        service = self.make_service()
+
+        import asyncio
+
+        with mock.patch("app.services.tsduck_service.subprocess.Popen", popen):
+            asyncio.run(self.start(service, service_ids=[101]))
+            self.wait_for_thread(service)
+
+        info = service.current_recording
+        self.assertIsNotNone(info)
+        assert info is not None
+        self.assertGreater(info.file_size_bytes, 0)
+        self.assertTrue((Path(self.tmpdir) / "capture.ts").exists(), "deleted real data")
+
+
 class ServiceFilterTest(RecordingStateTestCase):
     """M4: a service filter that names no service must never fall back to the mux.
 
@@ -356,14 +413,14 @@ class ServiceFilterTest(RecordingStateTestCase):
 
         with (
             mock.patch("app.services.tsduck_service.subprocess.Popen", popen),
-            self.assertRaises(NoServicesSelectedError) as caught,
+            self.assertRaises(tsduck.NoServicesSelectedError) as caught,
         ):
             asyncio.run(self.start(service, service_ids=[]))
 
         self.assertIn("full mux", str(caught.exception))
         self.assertIsNone(popen.last, "tsp was started for an empty selection")
         self.assertIsNone(service._recording_thread)
-        self.assertEqual(service.state, RecordingState.IDLE)
+        self.assertEqual(service.state, tsduck.RecordingState.IDLE)
         self.assertEqual(list(Path(self.tmpdir).glob("*.ts")), [])
 
     def test_selected_services_reach_the_zap_plugin(self):
@@ -382,6 +439,23 @@ class ServiceFilterTest(RecordingStateTestCase):
         self.assertEqual(argv[zap_at - 1], "-P")
         self.assertEqual(argv[zap_at + 1:zap_at + 3], ["101", "102"])
         self.assertIn("--no-ecm", argv)
+
+    def test_requested_duration_is_kept_on_the_recording(self):
+        # The panel redraws from duration_limit, so the requested number has to
+        # survive on the recording state and not only inside the tsp command.
+        popen = fake_tsp(data_after=0.1, exit_after=1.0)
+        service = self.make_service()
+
+        import asyncio
+
+        with mock.patch("app.services.tsduck_service.subprocess.Popen", popen):
+            asyncio.run(self.start(service, duration_seconds=120))
+            self.wait_for_thread(service)
+
+        info = service.current_recording
+        self.assertIsNotNone(info)
+        assert info is not None
+        self.assertEqual(info.duration_limit, 120)
 
     def test_full_mux_records_without_a_zap_plugin(self):
         popen = fake_tsp(data_after=0.1, exit_after=1.0)

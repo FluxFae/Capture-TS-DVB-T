@@ -31,6 +31,10 @@ _NORMALIZED_FIELD_SEPARATOR = re.compile(r":(?=[a-z][a-z0-9_]*=)")
 # be started from: resolve them from this file, never from the working dir.
 DEFAULT_RECORDINGS_DIR = Path(__file__).resolve().parents[2] / "recordings"
 
+# Below this size a file holds container tables only, never a service payload:
+# tsp writes 188 bytes and exits 0 when a zap filter matches nothing.
+EMPTY_CAPTURE_BYTES = 4096
+
 
 class NoServicesSelectedError(ValueError):
     """Raised when a service filter is requested but names no service."""
@@ -71,6 +75,13 @@ class MuxInfo:
 
 @dataclass
 class RecordingInfo:
+    """One capture: its target and its live counters.
+
+    ``duration_limit`` is the number of seconds the user asked for (``None``
+    means unlimited); the panel redraws from it so the typed value is not lost.
+    """
+
+
     filename: str
     filepath: str
     frequency: int
@@ -83,6 +94,7 @@ class RecordingInfo:
     services_filter: list[int] = field(default_factory=list)
     mux_info: MuxInfo | None = None
     last_error: str = ""
+    duration_limit: int | None = None
 
 
 class TSDuckService:
@@ -561,6 +573,7 @@ class TSDuckService:
             started_at=datetime.now(),
             state=RecordingState.TUNING,
             services_filter=service_ids or [],
+            duration_limit=duration_seconds,
         )
 
         self._stop_event.clear()
@@ -676,6 +689,18 @@ class TSDuckService:
             if filepath.exists():
                 rec.file_size_bytes = filepath.stat().st_size
 
+            tsp_error = self._tsp_error(stderr_lines)
+            if tsp_error and rec.file_size_bytes < EMPTY_CAPTURE_BYTES:
+                # ``tsp -P zap`` exits 0 after writing only the tables when the
+                # requested services are missing from the PAT, so a non-empty
+                # file does not prove a capture: 188 bytes of tables is not data.
+                self._discard_artifact(filepath)
+                rec.last_error = tsp_error
+                rec.state = RecordingState.ERROR
+                self._emit_state(self._get_recording_status())
+                self._emit_log(f"Recording failed: {tsp_error}", "error")
+                return
+
             if first_data_at is not None:
                 rec.duration_seconds = (
                     datetime.now() - first_data_at
@@ -688,6 +713,11 @@ class TSDuckService:
                     f"Duration: {rec.duration_seconds:.1f}s",
                     "success",
                 )
+                if tsp_error:
+                    self._emit_log(
+                        f"Capture ended with a tsp error (file kept): {tsp_error}",
+                        "warning",
+                    )
             elif stopped_by_user:
                 self._discard_empty_artifact(filepath)
                 rec.state = RecordingState.IDLE
@@ -741,6 +771,26 @@ class TSDuckService:
         with contextlib.suppress(OSError):
             if filepath.exists() and filepath.stat().st_size == 0:
                 filepath.unlink()
+
+    @staticmethod
+    def _discard_artifact(filepath: Path) -> None:
+        """Remove a capture artifact that carries no usable payload."""
+        with contextlib.suppress(OSError):
+            if filepath.exists() and filepath.stat().st_size < EMPTY_CAPTURE_BYTES:
+                filepath.unlink()
+
+    @staticmethod
+    def _tsp_error(stderr_lines: list[str]) -> str:
+        """Return tsp's own error line, if it reported one.
+
+        ``tsp`` prefixes its diagnostics with ``* Error:`` and still exits 0 for
+        recoverable failures such as a service filter that matched nothing, so
+        the message is the only trustworthy signal.
+        """
+        for line in stderr_lines:
+            if line.startswith("* Error:"):
+                return line
+        return ""
 
     @staticmethod
     def _failure_reason(
