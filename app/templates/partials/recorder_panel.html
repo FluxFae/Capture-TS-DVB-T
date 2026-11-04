@@ -1,4 +1,11 @@
 <form id="recorder-form">
+{% if recording_state == 'error' and current_recording and current_recording.last_error %}
+<div class="flux-alert flux-alert--error" id="recorder-error">
+    <i data-lucide="alert-triangle" class="flux-icon"></i>
+    <span>{{ current_recording.last_error }}</span>
+</div>
+{% endif %}
+
 <!-- Record mode selector -->
 <div class="flux-form-group">
     <label class="flux-label">CAPTURE MODE</label>

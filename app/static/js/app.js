@@ -88,8 +88,10 @@ function updateTelemetry(data) {
     if (stateEl) {
         const state = (data.state || 'idle').toUpperCase();
 
-        if ((lastKnownState === 'RECORDING' || lastKnownState === 'TUNING') && state === 'IDLE') {
-            // Auto-stop triggered: Refresh panel and recordings table via HTMX
+        if ((lastKnownState === 'RECORDING' || lastKnownState === 'TUNING') &&
+            (state === 'IDLE' || state === 'ERROR')) {
+            // Recording ended (completed, cancelled or failed): refresh the panel
+            // and the recordings table so the outcome and error are visible.
             if (typeof htmx !== 'undefined') {
                 htmx.ajax('GET', '/api/record/panel', {target: '#recorder-panel', swap: 'innerHTML'});
                 htmx.ajax('GET', '/api/recordings', {target: '#recordings-table', swap: 'innerHTML'});

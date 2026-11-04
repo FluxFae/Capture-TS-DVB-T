@@ -7,6 +7,7 @@ callbacks and programmatic control.
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -73,14 +74,26 @@ class RecordingInfo:
     state: RecordingState = RecordingState.IDLE
     services_filter: list[int] = field(default_factory=list)
     mux_info: MuxInfo | None = None
+    last_error: str = ""
 
 
 class TSDuckService:
     """Orchestrates all TSDuck operations for the application."""
 
-    def __init__(self, recordings_dir: str = "recordings"):
+    def __init__(
+        self,
+        recordings_dir: str = "recordings",
+        poll_interval: float = 0.5,
+    ):
+        """Create the service.
+
+        ``poll_interval`` is how often the recording monitor polls the tsp
+        process and the output file. The soloHD class tuners need several
+        seconds to lock, so this interval affects responsiveness only.
+        """
         self.recordings_dir = Path(recordings_dir)
         self.recordings_dir.mkdir(exist_ok=True)
+        self.poll_interval = poll_interval
 
         self._current_recording: RecordingInfo | None = None
         self._tsp_process: subprocess.Popen | None = None
@@ -474,8 +487,12 @@ class TSDuckService:
         filename: str | None = None,
     ) -> RecordingInfo:
         """Start recording a transport stream."""
-        if self.state == RecordingState.RECORDING:
-            raise RuntimeError("Already recording")
+        if self.state in (
+            RecordingState.TUNING,
+            RecordingState.RECORDING,
+            RecordingState.STOPPING,
+        ):
+            raise RuntimeError("A recording is already in progress")
 
         freq_hz = frequency if frequency > 1_000_000 else frequency * 1_000_000
 
@@ -538,97 +555,192 @@ class TSDuckService:
         return self._current_recording
 
     def _run_recording(self, cmd: list[str], filepath: Path, duration_limit: int | None = None) -> None:
-        """Run tsp recording in background thread."""
+        """Run tsp recording in background thread.
+
+        The tuner needs several seconds to lock, so the recording clock starts
+        at the first byte written to the output file, not when tsp is launched.
+        A process that dies before writing anything is reported as an error
+        instead of a successful empty capture.
+        """
+        rec = self._current_recording
+        if rec is None:
+            return
+
+        stderr_lines: list[str] = []
+        process: subprocess.Popen | None = None
+        first_data_at: datetime | None = None
+
         try:
             self._emit_log(f"Executing: {' '.join(cmd)}")
 
-            self._tsp_process = subprocess.Popen(
+            process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
             )
-
-            def consume_stderr(proc):
-                if not proc.stderr:
-                    return
-                for line in proc.stderr:
-                    if line:
-                        self._emit_log(line.strip(), "tsduck")
-            
-            threading.Thread(target=consume_stderr, args=(self._tsp_process,), daemon=True).start()
-
-            self._current_recording.state = RecordingState.RECORDING
-            self._emit_state(self._get_recording_status())
-            self._emit_log("Signal locked — recording started", "success")
-
-            # Monitor file size and process output
-            while not self._stop_event.is_set():
-                # Check if process ended
-                retcode = self._tsp_process.poll()
-                if retcode is not None:
-                    break
-
-                # Update file size
-                if filepath.exists():
-                    size = filepath.stat().st_size
-                    self._current_recording.file_size_bytes = size
-                
-                elapsed = (datetime.now() - self._current_recording.started_at).total_seconds()
-                self._current_recording.duration_seconds = elapsed
-                self._emit_state(self._get_recording_status())
-
-                if duration_limit and elapsed >= duration_limit:
-                    self._emit_log(f"Duration limit reached ({duration_limit}s), stopping recording...", "info")
-                    break
-
-                time.sleep(0.5)
-
-            # Process ended or stop requested
-            if self._tsp_process.poll() is None:
-                self._tsp_process.terminate()
-                try:
-                    self._tsp_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self._tsp_process.kill()
-
-            # Final file size
-            if filepath.exists():
-                self._current_recording.file_size_bytes = filepath.stat().st_size
-
-            self._current_recording.duration_seconds = (
-                datetime.now() - self._current_recording.started_at
-            ).total_seconds()
-            self._current_recording.state = RecordingState.IDLE
-            self._emit_state(self._get_recording_status())
-            self._emit_log(
-                f"Recording stopped. File: {filepath.name}, "
-                f"Size: {self._format_size(self._current_recording.file_size_bytes)}, "
-                f"Duration: {self._current_recording.duration_seconds:.1f}s",
-                "success",
+            self._tsp_process = process
+            drain = threading.Thread(
+                target=self._drain_stderr,
+                args=(process, stderr_lines),
+                daemon=True,
             )
+            drain.start()
+
+            while not self._stop_event.is_set():
+                returncode = process.poll()
+
+                if filepath.exists():
+                    rec.file_size_bytes = filepath.stat().st_size
+                    if rec.file_size_bytes > 0 and first_data_at is None:
+                        first_data_at = datetime.now()
+                        rec.state = RecordingState.RECORDING
+                        self._emit_log("Signal locked — recording started", "success")
+                        self._emit_state(self._get_recording_status())
+
+                if first_data_at is not None:
+                    rec.duration_seconds = (
+                        datetime.now() - first_data_at
+                    ).total_seconds()
+
+                if (
+                    duration_limit
+                    and first_data_at is not None
+                    and rec.duration_seconds >= duration_limit
+                ):
+                    self._emit_log(
+                        f"Duration limit reached ({duration_limit}s), stopping recording...",
+                        "info",
+                    )
+                    break
+
+                if returncode is not None:
+                    break
+
+                self._emit_state(self._get_recording_status())
+                time.sleep(self.poll_interval)
+
+            stopped_by_user = self._stop_event.is_set()
+            self._terminate_process(process)
+
+            if filepath.exists():
+                rec.file_size_bytes = filepath.stat().st_size
+
+            if first_data_at is not None:
+                rec.duration_seconds = (
+                    datetime.now() - first_data_at
+                ).total_seconds()
+                rec.state = RecordingState.IDLE
+                self._emit_state(self._get_recording_status())
+                self._emit_log(
+                    f"Recording stopped. File: {filepath.name}, "
+                    f"Size: {self._format_size(rec.file_size_bytes)}, "
+                    f"Duration: {rec.duration_seconds:.1f}s",
+                    "success",
+                )
+            elif stopped_by_user:
+                self._discard_empty_artifact(filepath)
+                rec.state = RecordingState.IDLE
+                self._emit_state(self._get_recording_status())
+                self._emit_log(
+                    "Recording cancelled before signal lock — no data was written",
+                    "warning",
+                )
+            else:
+                # Give the drain thread a moment: tsp reports its failure on
+                # stderr and exits, and that message is the useful diagnosis.
+                drain.join(timeout=2)
+                rec.last_error = self._failure_reason(stderr_lines, process, duration_limit)
+                self._discard_empty_artifact(filepath)
+                rec.state = RecordingState.ERROR
+                self._emit_state(self._get_recording_status())
+                self._emit_log(f"Recording failed: {rec.last_error}", "error")
 
         except Exception as e:
-            self._current_recording.state = RecordingState.ERROR
-            self._emit_log(f"Recording error: {e}", "error")
+            self._terminate_process(process)
+            rec.last_error = f"Recording error: {e}"
+            rec.state = RecordingState.ERROR
+            self._emit_log(rec.last_error, "error")
             self._emit_state(self._get_recording_status())
 
+    def _drain_stderr(self, process: subprocess.Popen, sink: list[str]) -> None:
+        """Forward tsp stderr to the log and keep it for failure reporting."""
+        if not process.stderr:
+            return
+        for line in process.stderr:
+            cleaned = line.strip()
+            if cleaned:
+                sink.append(cleaned)
+                self._emit_log(cleaned, "tsduck")
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen | None) -> None:
+        """Stop a tsp process, escalating to kill if it ignores terminate."""
+        if process is None or process.poll() is not None:
+            return
+        with contextlib.suppress(Exception):
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+    @staticmethod
+    def _discard_empty_artifact(filepath: Path) -> None:
+        """Remove the empty file tsp leaves behind when a capture fails."""
+        with contextlib.suppress(OSError):
+            if filepath.exists() and filepath.stat().st_size == 0:
+                filepath.unlink()
+
+    @staticmethod
+    def _failure_reason(
+        stderr_lines: list[str],
+        process: subprocess.Popen | None,
+        duration_limit: int | None,
+    ) -> str:
+        """Build a human-readable reason for a capture that produced no data."""
+        for line in reversed(stderr_lines):
+            if "error" in line.lower():
+                return line
+        for line in reversed(stderr_lines):
+            if line:
+                return line
+        returncode = process.returncode if process is not None else None
+        if returncode:
+            return f"tsp exited with code {returncode} before receiving any data"
+        if duration_limit:
+            return "No data was received before the duration limit expired"
+        return "No data was received — check antenna, device and frequency"
+
     async def stop_recording(self) -> RecordingInfo | None:
-        """Stop the current recording."""
-        if not self._current_recording or self.state != RecordingState.RECORDING:
+        """Stop the current recording, including while it is still tuning."""
+        rec = self._current_recording
+        if rec is None or rec.state not in (
+            RecordingState.TUNING,
+            RecordingState.RECORDING,
+            RecordingState.STOPPING,
+        ):
             return None
 
+        if rec.state == RecordingState.STOPPING:
+            return rec
+
         self._emit_log("Stopping recording...")
-        self._current_recording.state = RecordingState.STOPPING
+        rec.state = RecordingState.STOPPING
         self._emit_state(self._get_recording_status())
 
         self._stop_event.set()
 
-        if self._recording_thread:
-            await asyncio.to_thread(self._recording_thread.join, timeout=10)
+        thread = self._recording_thread
+        if thread:
+            await asyncio.to_thread(thread.join, timeout=10)
+            if thread.is_alive():
+                # The monitor thread is stuck; make sure tsp is not orphaned.
+                self._terminate_process(self._tsp_process)
+                await asyncio.to_thread(thread.join, timeout=5)
 
-        return self._current_recording
+        return rec
 
     # ──────────────────────────────────────────────
     # Recordings library
@@ -650,13 +762,20 @@ class TSDuckService:
         return recordings
 
     async def delete_recording(self, filename: str) -> bool:
-        """Delete a recording file."""
-        filepath = self.recordings_dir / filename
-        if filepath.exists() and filepath.suffix == ".ts":
-            filepath.unlink()
-            self._emit_log(f"Deleted recording: {filename}")
-            return True
-        return False
+        """Delete a recording file, refusing any path outside the recordings dir."""
+        if not filename or Path(filename).suffix != ".ts":
+            return False
+
+        root = self.recordings_dir.resolve()
+        candidate = (root / filename).resolve()
+        # Backslashes are path separators on Windows, so a "filename" such as
+        # "..\\victim.ts" would otherwise escape the recordings directory.
+        if candidate.parent != root or not candidate.is_file():
+            return False
+
+        candidate.unlink()
+        self._emit_log(f"Deleted recording: {candidate.name}")
+        return True
 
     # ──────────────────────────────────────────────
     # Helpers
@@ -670,6 +789,7 @@ class TSDuckService:
         rec = self._current_recording
         return {
             "state": rec.state.value,
+            "last_error": rec.last_error,
             "filename": rec.filename,
             "frequency": rec.frequency,
             "file_size": rec.file_size_bytes,
