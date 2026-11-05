@@ -1,0 +1,115 @@
+{#- Stream report card content (openspec/changes/stream-report-ui S2, S5, S6, S7).
+
+    S6: a report is never rendered without naming its source. The three states are
+    mutually exclusive: a report, a finished capture waiting for the operator, or
+    nothing yet. -#}
+{% if report %}
+<div class="flux-report" id="report-content">
+    <div class="flux-dvb-triplet">
+        <div class="flux-dvb-triplet__item">
+            <span class="flux-dvb-triplet__label">SOURCE</span>
+            <span class="flux-dvb-triplet__value" id="report-source">{{ report.source }}</span>
+        </div>
+        <div class="flux-dvb-triplet__separator">
+            <i data-lucide="chevron-right" class="flux-icon--xs"></i>
+        </div>
+        <div class="flux-dvb-triplet__item">
+            <span class="flux-dvb-triplet__label">TSID</span>
+            <span class="flux-dvb-triplet__value">{{ report.integrity.transport_stream_id }}</span>
+        </div>
+        <div class="flux-dvb-triplet__separator">
+            <i data-lucide="chevron-right" class="flux-icon--xs"></i>
+        </div>
+        <div class="flux-dvb-triplet__item">
+            <span class="flux-dvb-triplet__label">SERVICES</span>
+            <span class="flux-dvb-triplet__value">{{ report.integrity.service_count }}</span>
+        </div>
+        <div class="flux-dvb-triplet__separator">
+            <i data-lucide="chevron-right" class="flux-icon--xs"></i>
+        </div>
+        <div class="flux-dvb-triplet__item">
+            <span class="flux-dvb-triplet__label">COUNTRY</span>
+            <span class="flux-dvb-triplet__value">{{ report.integrity.country or '—' }}</span>
+        </div>
+    </div>
+
+    {#- Layer 1: the integrity numbers. Transport errors are the headline: the
+        question this card answers is whether the capture is intact. -#}
+    <div class="flux-mux-stats">
+        <div class="flux-metric flux-metric--inline">
+            <span class="flux-metric__value--sm flux-metric__value--mono">{{ report.integrity.packets.total }}</span>
+            <span class="flux-metric__label--sm">Packets</span>
+        </div>
+        <div class="flux-metric flux-metric--inline">
+            <span class="flux-badge {{ 'flux-badge--success' if report.integrity.packets.transport_errors == 0 else 'flux-badge--warning' }}"
+                  id="report-transport-errors">{{ report.integrity.packets.transport_errors }}</span>
+            <span class="flux-metric__label--sm">Transport errors</span>
+        </div>
+        <div class="flux-metric flux-metric--inline">
+            <span class="flux-metric__value--sm flux-metric__value--mono">{{ report.integrity.packets.invalid_syncs }}</span>
+            <span class="flux-metric__label--sm">Invalid sync</span>
+        </div>
+        <div class="flux-metric flux-metric--inline">
+            <span class="flux-metric__value--sm flux-metric__value--mono">{{ report.integrity.pids.total }}</span>
+            <span class="flux-metric__label--sm">PIDs</span>
+        </div>
+        <div class="flux-metric flux-metric--inline">
+            <span class="flux-metric__value--sm flux-metric__value--mono">{{ report.integrity.bitrate_188 }}</span>
+            <span class="flux-metric__label--sm">bit/s @188</span>
+        </div>
+        <div class="flux-metric flux-metric--inline">
+            <span class="flux-metric__value--sm flux-metric__value--mono">{{ report.integrity.duration_seconds }}s</span>
+            <span class="flux-metric__label--sm">Duration</span>
+        </div>
+    </div>
+
+    {#- Layer 2: the services and how many PIDs each one carries. -#}
+    {% if report.services %}
+    <div class="flux-table-container">
+        <table class="flux-table">
+            <thead>
+                <tr>
+                    <th>Service</th>
+                    <th>Provider</th>
+                    <th>PIDs</th>
+                    <th>bit/s @188</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for service in report.services %}
+                <tr>
+                    <td>{{ service.name or '—' }}</td>
+                    <td>{{ service.provider or '—' }}</td>
+                    <td>{{ service.pids|length }}</td>
+                    <td>{{ service.bitrate_188 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="flux-empty-state flux-empty-state--error" id="report-no-services">
+        <i data-lucide="alert-triangle" class="flux-empty-state__icon"></i>
+        <p>No service was decoded: this capture carries no tables.</p>
+    </div>
+    {% endif %}
+</div>
+{% elif report_pending_bytes is not none %}
+{#- S4: over the gate the operator asks for it, and the size is shown so the
+    wait is a decision instead of a surprise. -#}
+<div class="flux-empty-state" id="report-pending">
+    <i data-lucide="file-search" class="flux-empty-state__icon"></i>
+    <p>Capture of {{ report_pending_bytes|filesize }} is ready to be analyzed.</p>
+    <button type="button"
+            class="flux-btn flux-btn--primary flux-btn--sm"
+            id="report-analyze-button"
+            hx-post="/api/report/analyze"
+            hx-target="#report-section-body"
+            hx-swap="innerHTML">Analyze capture</button>
+</div>
+{% else %}
+<div class="flux-empty-state" id="report-empty">
+    <i data-lucide="file-bar-chart" class="flux-empty-state__icon"></i>
+    <p>No report yet. Record a capture — small ones report themselves.</p>
+</div>
+{% endif %}

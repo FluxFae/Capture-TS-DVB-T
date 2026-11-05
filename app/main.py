@@ -115,6 +115,15 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 # Available to every template, so the footer never hardcodes a version.
 templates.env.globals["app_version"] = APP_VERSION
+templates.env.filters["filesize"] = tsduck_service._format_size
+
+
+def _report_context() -> dict:
+    """Context for the report card: at most one of its states can render."""
+    return {
+        "report": tsduck_service.current_report,
+        "report_pending_bytes": tsduck_service.report_pending_bytes,
+    }
 
 
 # ──────────────────────────────────────────────
@@ -138,6 +147,7 @@ async def dashboard(request: Request):
             "recordings": recordings,
             "recording_state": tsduck_service.state.value,
             "current_recording": tsduck_service.current_recording,
+            **_report_context(),
         },
     )
 
@@ -326,6 +336,17 @@ async def delete_recording(request: Request, filename: str):
         request=request,
         name="partials/recordings_table.html",
         context={"recordings": recordings},
+    )
+
+
+@app.post("/api/report/analyze", response_class=HTMLResponse)
+async def analyze_capture_report(request: Request):
+    """Build the report for the finished capture the operator asked about."""
+    await tsduck_service.analyze_pending_capture()
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/report_card.html",
+        context=_report_context(),
     )
 
 
