@@ -1,0 +1,107 @@
+{
+  "pids": [
+    {
+      "audio": false,
+      "bitrate": 0,
+      "bitrate-204": 0,
+      "description": "PAT",
+      "ecm": false,
+      "emm": false,
+      "global": true,
+      "id": 0,
+      "iip": false,
+      "is-scrambled": false,
+      "packets": {
+        "af": 0,
+        "clear": 85000,
+        "discontinuities": 0,
+        "dts": 0,
+        "dts-leap": 0,
+        "duplicated": 0,
+        "invalid-scrambling": 0,
+        "pcr": 0,
+        "pcr-leap": 0,
+        "pts": 0,
+        "pts-leap": 0,
+        "scrambled": 0,
+        "total": 85000
+      },
+      "pmt": false,
+      "service-count": 0,
+      "t2mi": false,
+      "unit-start": 0,
+      "unreferenced": false,
+      "video": false
+    }
+  ],
+  "time": {
+    "local": {
+      "system": {
+        "first": {
+          "date": "2026/11/05",
+          "seconds-since-2000": 847205082,
+          "time": "14:44:42.499"
+        },
+        "last": {
+          "date": "2026/11/05",
+          "seconds-since-2000": 847205082,
+          "time": "14:44:42.616"
+        }
+      }
+    },
+    "utc": {
+      "system": {
+        "first": {
+          "date": "2026/11/05",
+          "seconds-since-2000": 847201482,
+          "time": "13:44:42.499"
+        },
+        "last": {
+          "date": "2026/11/05",
+          "seconds-since-2000": 847201482,
+          "time": "13:44:42.616"
+        }
+      }
+    }
+  },
+  "ts": {
+    "bitrate": 0,
+    "bitrate-204": 0,
+    "bytes": 15980000,
+    "duration": 0,
+    "packets": {
+      "invalid-syncs": 0,
+      "suspect-ignored": 0,
+      "total": 85000,
+      "transport-errors": 0
+    },
+    "pcr-bitrate": 0,
+    "pcr-bitrate-204": 0,
+    "pids": {
+      "clear": 1,
+      "global": {
+        "bitrate": 0,
+        "bitrate-204": 0,
+        "clear": 1,
+        "is-scrambled": false,
+        "packets": 85000,
+        "pids": [
+          0
+        ],
+        "scrambled": 0,
+        "total": 1
+      },
+      "pcr": 0,
+      "scrambled": 0,
+      "total": 1,
+      "unreferenced": 0
+    },
+    "services": {
+      "clear": 0,
+      "scrambled": 0,
+      "total": 0
+    },
+    "user-bitrate": 0,
+    "user-bitrate-204": 0
+  }
+}
