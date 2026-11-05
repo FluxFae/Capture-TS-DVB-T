@@ -20,6 +20,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
+from app.services import report
 from app.services.devices import DVBDevice
 
 # A normalized record is a list of ``key=value`` fields joined by ':'. Only a
@@ -34,6 +35,11 @@ DEFAULT_RECORDINGS_DIR = Path(__file__).resolve().parents[2] / "recordings"
 # Below this size a file holds container tables only, never a service payload:
 # tsp writes 188 bytes and exits 0 when a zap filter matches nothing.
 EMPTY_CAPTURE_BYTES = 4096
+
+# A report is a full scan of the file. Measured at roughly 7 ms per MB, so a
+# capture at the 512 MiB automatic-analysis gate costs a few seconds and this
+# leaves a wide margin for a slow disk.
+REPORT_TIMEOUT_SECONDS = 120
 
 
 class NoServicesSelectedError(ValueError):
@@ -264,6 +270,31 @@ class TSDuckService:
         except Exception as e:
             self._emit_log(f"File analysis error: {e}", "error")
             return None
+
+    async def analyze_report_file(self, filepath: str) -> report.StreamReport:
+        """Analyze an existing .ts file into the stream report model.
+
+        Uses ``tsanalyze --json``: the colon-delimited ``--normalized`` output
+        truncates any value that contains a colon, and the report needs nested
+        data anyway. A failed run raises instead of returning a partial report,
+        so the caller can show an error state rather than invented numbers.
+        """
+        self._emit_log(f"Analyzing report: {filepath}")
+
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ["tsanalyze", "--json", filepath],
+            capture_output=True,
+            text=True,
+            timeout=REPORT_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            detail = result.stderr.strip() or "no output"
+            raise report.ReportParseError(f"tsanalyze failed for {filepath}: {detail}")
+
+        return report.parse_tsanalyze_json(
+            result.stdout, source=f"file {Path(filepath).name}"
+        )
 
     def _parse_normalized_analysis(self, output: str) -> MuxInfo | None:
         """Parse tsanalyze --normalized output into MuxInfo.
