@@ -41,6 +41,17 @@ EMPTY_CAPTURE_BYTES = 4096
 # leaves a wide margin for a slow disk.
 REPORT_TIMEOUT_SECONDS = 120
 
+# A finished capture builds its report on its own only while it stays small.
+# Measured at roughly 7 ms per MB, so 512 MiB is about 4 s, while a 30 minute
+# unlimited capture at 24.9 Mbit/s is ~5.6 GB and ~40 s: a silent wait that
+# long reads as a hang, so above this the operator asks for it explicitly.
+AUTO_ANALYZE_MAX_BYTES = 512 * 1024 * 1024
+
+
+def should_analyze_automatically(file_size: int) -> bool:
+    """Whether a finished capture is analysed without being asked (S4)."""
+    return 0 < file_size <= AUTO_ANALYZE_MAX_BYTES
+
 
 class NoServicesSelectedError(ValueError):
     """Raised when a service filter is requested but names no service."""
@@ -133,6 +144,18 @@ class TSDuckService:
         self._stop_event = threading.Event()
         self._log_callback: Callable[[str], None] | None = None
         self._state_callback: Callable[[dict], None] | None = None
+        self._current_report: report.StreamReport | None = None
+        self._report_pending_bytes: int | None = None
+
+    @property
+    def current_report(self) -> report.StreamReport | None:
+        """The report of the last capture that finished, if one was built."""
+        return self._current_report
+
+    @property
+    def report_pending_bytes(self) -> int | None:
+        """Size of a finished capture waiting for the operator to ask for it."""
+        return self._report_pending_bytes
 
     @property
     def state(self) -> RecordingState:
@@ -280,10 +303,16 @@ class TSDuckService:
         so the caller can show an error state rather than invented numbers.
         """
         self._emit_log(f"Analyzing report: {filepath}")
+        return await asyncio.to_thread(self._run_tsanalyze_report, filepath)
 
-        result = await asyncio.to_thread(
-            subprocess.run,
-            ["tsanalyze", "--json", filepath],
+    def _run_tsanalyze_report(self, filepath: str | Path) -> report.StreamReport:
+        """Run ``tsanalyze --json`` and parse it. Blocking on purpose.
+
+        The asynchronous entry point wraps this in a thread, and the recording
+        monitor calls it directly once its capture has already finished.
+        """
+        result = subprocess.run(
+            ["tsanalyze", "--json", str(filepath)],
             capture_output=True,
             text=True,
             timeout=REPORT_TIMEOUT_SECONDS,
@@ -294,6 +323,49 @@ class TSDuckService:
 
         return report.parse_tsanalyze_json(
             result.stdout, source=f"file {Path(filepath).name}"
+        )
+
+    def _analyze_finished_capture(self, filepath: Path) -> None:
+        """Build the report for a capture that just ended well (S4).
+
+        Called from the recording monitor after the capture has finished, so a
+        report never races the file being written. A report that cannot be built
+        must not disturb the recorder: the failure is logged and the capture is
+        still reported as successful.
+        """
+        self._current_report = None
+        self._report_pending_bytes = None
+
+        try:
+            file_size = filepath.stat().st_size
+        except OSError as error:
+            self._emit_log(f"Report skipped: {error}", "warning")
+            return
+
+        if not should_analyze_automatically(file_size):
+            self._report_pending_bytes = file_size
+            self._emit_log(
+                f"Capture is {self._format_size(file_size)}; "
+                "analyze it on request to build the report",
+                "info",
+            )
+            return
+
+        self._emit_log(f"Analyzing capture: {filepath.name}")
+        try:
+            self._current_report = self._run_tsanalyze_report(filepath)
+        except Exception as error:
+            # Best-effort background step: a broken report must never turn a
+            # successful capture into a failure or kill the monitor thread.
+            self._emit_log(f"Report failed: {error}", "error")
+            return
+
+        integrity = self._current_report.integrity
+        level = "success" if integrity.packets.transport_errors == 0 else "warning"
+        self._emit_log(
+            f"Report ready: {integrity.service_count} services, "
+            f"{integrity.packets.transport_errors} transport errors",
+            level,
         )
 
     def _parse_normalized_analysis(self, output: str) -> MuxInfo | None:
@@ -749,6 +821,7 @@ class TSDuckService:
                         f"Capture ended with a tsp error (file kept): {tsp_error}",
                         "warning",
                     )
+                self._analyze_finished_capture(filepath)
             elif stopped_by_user:
                 self._discard_empty_artifact(filepath)
                 rec.state = RecordingState.IDLE
