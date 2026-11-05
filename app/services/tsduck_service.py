@@ -368,6 +368,36 @@ class TSDuckService:
             level,
         )
 
+    async def analyze_pending_capture(self) -> report.StreamReport | None:
+        """Build the report the size gate left for the operator (S4).
+
+        Returns the report it built, the one already built, or ``None`` when
+        there is nothing to analyze. A failure is logged and reported as no
+        report, never as a fabricated one.
+        """
+        if self._current_report is not None:
+            return self._current_report
+
+        rec = self._current_recording
+        if rec is None or not rec.filepath:
+            return None
+
+        filepath = Path(rec.filepath)
+        if not filepath.exists():
+            return None
+
+        self._emit_log(f"Analyzing capture on request: {filepath.name}")
+        try:
+            self._current_report = await asyncio.to_thread(
+                self._run_tsanalyze_report, filepath
+            )
+        except Exception as error:
+            self._emit_log(f"Report failed: {error}", "error")
+            return None
+
+        self._report_pending_bytes = None
+        return self._current_report
+
     def _parse_normalized_analysis(self, output: str) -> MuxInfo | None:
         """Parse tsanalyze --normalized output into MuxInfo.
 
