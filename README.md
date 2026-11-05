@@ -52,6 +52,8 @@ Capture-TS is a lightweight web-based DVB-T transport stream capture and recordi
    ```bash
    pip install -r requirements.txt
    ```
+   The pins use `~=` (compatible release) at the versions this release was verified
+   with, so patch and minor fixes are accepted automatically but a new minor is not.
 
 4. **Run the application**:
    ```bash
@@ -64,14 +66,17 @@ Capture-TS is a lightweight web-based DVB-T transport stream capture and recordi
 
 Capture-TS is developed and verified against one concrete setup:
 
-- Hauppauge WinTV-soloHD, **DVB-T** tuner (device index `0`), 8 MHz muxes
+- Hauppauge WinTV-soloHD, **DVB-T** tuner, 8 MHz muxes
 - Windows 11, Python 3.12, TSDuck `3.43-4549`
 
 The DVB-T2 and DVB-C paths that this hybrid receiver also exposes are **not** verified.
-The device list is whatever `tslsdvb` reports: this stick exposes a DVB-T tuner as
-device `0` and a DVB-C tuner as device `1`. The form preselects the DVB-T device and
-only offers the delivery systems the selected device reports, so picking the DVB-C
-tuner exposes `DVB-C` / `DVB-C/C` instead of sending an incompatible system to `tsp`.
+The stick carries two tuners, one DVB-T/DVB-T2 and one DVB-C, and `tslsdvb` numbers them
+in whatever order Windows enumerates them: the same stick has been seen with the DVB-T
+tuner first and, after a reconnect, second. **Do not rely on an index.** The form
+preselects the tuner that reports DVB-T and only offers the delivery systems the
+selected device reports, so picking the DVB-C tuner exposes `DVB-C` / `DVB-C/C` instead
+of sending an incompatible system to `tsp`; an incompatible pair is refused with a
+message naming the device and the systems it supports.
 The DVB-C tuner was confirmed to reach `tsp` and tune, but no cable signal was
 available, so DVB-C reception itself is untested.
 
@@ -98,7 +103,8 @@ venv\Scripts\python.exe -m unittest discover -s tests -t . -v
 ## ⚙️ Tech Stack
 
 - **Backend**: Python 3.12, FastAPI, Jinja2
-- **Frontend**: HTMX, Lit Web Components, Tailwind CSS
+- **Frontend**: HTMX, Lit Web Components, CSS custom properties (`flux-tokens.css` and
+  `flux.css`)
 - **DVB Tooling**: TSDuck (`tsp`, `tsanalyze`, `tslsdvb`)
 
 ## 🤖 Development & Vibecoding

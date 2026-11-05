@@ -1,5 +1,19 @@
-fastapi>=0.136.0
-uvicorn[standard]>=0.46.0
-jinja2>=3.1.0
-python-multipart>=0.0.27
-websockets>=16.0
+# Compatible-release bounds (~=): patch/minor fixes are accepted, a new minor is not.
+# These are the versions the suite and the real tuner were verified with.
+#
+# Known and intentional gap: uvicorn[standard] also declares python-dotenv, which is
+# only used by `uvicorn --env-file` (this app never passes it). Nothing in this project
+# imports it, and the app was verified to boot and record without it, so it is not an
+# application dependency and must not be declared here. pip still pulls it in as part of
+# the extra: that is expected and harmless, not a mistake to fix.
+#
+# Do not replace uvicorn[standard] with a hand-written list of its internals. It was
+# considered and rejected: uvicorn raises those floors between releases (0.54 already
+# requires httptools>=0.8.0), so a manual list goes stale silently while the extra
+# updates itself.
+fastapi~=0.162.0
+starlette~=1.10.0
+uvicorn[standard]~=0.54.0
+jinja2~=3.1.6
+python-multipart~=0.0.33
+websockets~=17.4.0

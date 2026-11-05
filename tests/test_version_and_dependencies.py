@@ -9,6 +9,7 @@ These tests pin the invariant: one package version, rendered everywhere, and a
 requirements file that lists only what the code actually imports.
 """
 
+import re
 import unittest
 from pathlib import Path
 
@@ -18,6 +19,25 @@ from app.version import APP_VERSION
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BASE_TEMPLATE = PROJECT_ROOT / "app" / "templates" / "base.html"
 REQUIREMENTS = PROJECT_ROOT / "requirements.txt"
+
+
+def declared_requirements():
+    """The requirement lines only: a comment is prose, not a declaration."""
+    entries = []
+
+    for line in REQUIREMENTS.read_text(encoding="utf-8").splitlines():
+        entry = line.split("#", 1)[0].strip()
+        if entry:
+            entries.append(entry)
+
+    return entries
+
+
+def requirement_name(entry):
+    """The distribution name of a requirement line, without extras or bounds."""
+    matched = re.match(r"[A-Za-z0-9._-]+", entry)
+
+    return matched.group().lower() if matched else ""
 
 
 class VersionTest(unittest.TestCase):
@@ -54,7 +74,7 @@ class VersionTest(unittest.TestCase):
 
 class DeclaredDependenciesTest(unittest.TestCase):
     def test_requirements_does_not_declare_packages_the_app_never_imports(self):
-        declared = REQUIREMENTS.read_text(encoding="utf-8").lower()
+        declared = {requirement_name(entry) for entry in declared_requirements()}
 
         for unused in ("aiofiles", "python-dotenv"):
             self.assertNotIn(
@@ -64,10 +84,33 @@ class DeclaredDependenciesTest(unittest.TestCase):
             )
 
     def test_requirements_still_declares_what_the_app_needs(self):
-        declared = REQUIREMENTS.read_text(encoding="utf-8").lower()
+        declared = {requirement_name(entry) for entry in declared_requirements()}
 
         for needed in ("fastapi", "uvicorn", "jinja2", "python-multipart", "websockets"):
             self.assertIn(needed, declared, f"{needed} is imported but not declared")
+
+
+class RequirementBoundsTest(unittest.TestCase):
+    """A clean install must reproduce the set that was actually tested.
+
+    ``openspec/changes/upgrade-deps`` records why: open lower bounds let a fresh
+    ``pip install -r requirements.txt`` resolve a combination nobody ran.
+    """
+
+    REQUIREMENT_LINE = re.compile(r"[A-Za-z0-9._-]+(\[[A-Za-z0-9,._-]+\])?~=\d+\.\d+\.\d+")
+
+    def test_every_requirement_uses_a_compatible_release_bound(self):
+        unpinned = [
+            entry
+            for entry in declared_requirements()
+            if not self.REQUIREMENT_LINE.fullmatch(entry)
+        ]
+
+        self.assertEqual(
+            [],
+            unpinned,
+            "these requirements are not pinned to a tested release:",
+        )
 
 
 if __name__ == "__main__":
