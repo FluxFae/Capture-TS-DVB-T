@@ -16,4 +16,4 @@ starlette~=1.10.0
 uvicorn[standard]~=0.54.0
 jinja2~=3.1.6
 python-multipart~=0.0.28
-websockets~=16.0.0
+websockets~=17.4.0
