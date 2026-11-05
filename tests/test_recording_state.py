@@ -9,7 +9,9 @@ recording without data, must measure the duration limit from the first byte
 (not from process launch), and must surface ``tsp`` failures.
 """
 
+import asyncio
 import io
+import subprocess
 import tempfile
 import time
 import unittest
@@ -17,6 +19,10 @@ from pathlib import Path
 from unittest import mock
 
 from app.services import tsduck_service as tsduck
+
+STREAM_RAW = (
+    Path(__file__).resolve().parent / "fixtures" / "tsanalyze_674mhz.json"
+).read_text(encoding="utf-8")
 
 
 class SlowStderr:
@@ -469,6 +475,98 @@ class ServiceFilterTest(RecordingStateTestCase):
 
         self.assertIsNotNone(popen.last)
         self.assertNotIn("zap", popen.last.argv)  # type: ignore[union-attr]
+
+
+class AutoAnalyzeGateTest(unittest.TestCase):
+    """S4: the gate is a pure function of the finished file size.
+
+    512 MiB is a few seconds of analysis; a 30 minute unlimited capture at
+    24.9 Mbit/s is ~5.6 GB and ~40 s, which reads as a hang if nobody asked for
+    it.
+    """
+
+    def test_a_small_capture_is_analyzed_automatically(self):
+        self.assertTrue(tsduck.should_analyze_automatically(200 * 1024 * 1024))
+
+    def test_the_gate_includes_the_threshold_itself(self):
+        self.assertTrue(
+            tsduck.should_analyze_automatically(tsduck.AUTO_ANALYZE_MAX_BYTES)
+        )
+
+    def test_one_byte_over_the_gate_needs_the_operator(self):
+        self.assertFalse(
+            tsduck.should_analyze_automatically(tsduck.AUTO_ANALYZE_MAX_BYTES + 1)
+        )
+
+    def test_an_empty_file_is_never_analyzed(self):
+        self.assertFalse(tsduck.should_analyze_automatically(0))
+
+
+class AutoReportAfterCaptureTest(RecordingStateTestCase):
+    """S4: a finished capture reports on itself; a failed one does not."""
+
+    def completed_report(self):
+        return subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=STREAM_RAW, stderr=""
+        )
+
+    def test_a_finished_capture_produces_a_report_without_user_action(self):
+        popen = fake_tsp(data_after=0.1, exit_after=None)
+        service = self.make_service()
+
+        with mock.patch(
+            "app.services.tsduck_service.subprocess.Popen", popen
+        ), mock.patch(
+            "app.services.tsduck_service.subprocess.run",
+            return_value=self.completed_report(),
+        ):
+            asyncio.run(self.start(service, duration_seconds=0.3))
+            self.wait_for_thread(service)
+
+        built = service.current_report
+        self.assertIsNotNone(built, "a finished capture left the report empty")
+        assert built is not None
+        self.assertEqual("file capture.ts", built.source)
+        self.assertEqual(19, built.integrity.service_count)
+        self.assertEqual(0, built.integrity.packets.transport_errors)
+        self.assertIsNone(service.report_pending_bytes)
+
+    def test_a_capture_over_the_gate_waits_for_the_operator(self):
+        popen = fake_tsp(data_after=0.1, exit_after=None)
+        service = self.make_service()
+
+        with mock.patch(
+            "app.services.tsduck_service.subprocess.Popen", popen
+        ), mock.patch.object(
+            tsduck, "AUTO_ANALYZE_MAX_BYTES", 10
+        ), mock.patch(
+            "app.services.tsduck_service.subprocess.run"
+        ) as run:
+            asyncio.run(self.start(service, duration_seconds=0.3))
+            self.wait_for_thread(service)
+
+        self.assertIsNone(service.current_report)
+        self.assertEqual(4096, service.report_pending_bytes)
+        run.assert_not_called()
+
+    def test_a_failed_capture_produces_no_report_at_all(self):
+        popen = fake_tsp(
+            data_after=None,
+            exit_after=0.3,
+            stderr_text="* Error: no input DVB signal\n",
+        )
+        service = self.make_service()
+
+        with mock.patch(
+            "app.services.tsduck_service.subprocess.Popen", popen
+        ), mock.patch("app.services.tsduck_service.subprocess.run") as run:
+            asyncio.run(self.start(service, duration_seconds=5))
+            self.wait_for_thread(service)
+
+        self.assertEqual(tsduck.RecordingState.ERROR, service.state)
+        self.assertIsNone(service.current_report)
+        self.assertIsNone(service.report_pending_bytes)
+        run.assert_not_called()
 
 
 if __name__ == "__main__":
