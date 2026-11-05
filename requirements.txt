@@ -11,7 +11,8 @@
 # considered and rejected: uvicorn raises those floors between releases (0.54 already
 # requires httptools>=0.8.0), so a manual list goes stale silently while the extra
 # updates itself.
-fastapi~=0.136.1
+fastapi~=0.162.0
+starlette~=1.10.0
 uvicorn[standard]~=0.54.0
 jinja2~=3.1.6
 python-multipart~=0.0.28
