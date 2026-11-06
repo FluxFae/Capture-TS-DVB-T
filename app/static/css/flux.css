@@ -201,6 +201,9 @@ html:not(.dark) {
 .flux-btn--sm { padding: 6px 12px; font-size: 12px; }
 .flux-btn--full { width: 100%; }
 .flux-btn--danger-hover:hover { color: var(--flux-error); }
+/* hx-indicator="this" puts htmx-request on the button itself: the analysis of a
+   long capture takes seconds, so the button has to look busy meanwhile. */
+.flux-btn.htmx-request { opacity: 0.55; cursor: progress; }
 .flux-btn__content { display: flex; align-items: center; gap: var(--space-sm); }
 
 /* Record button pulse */

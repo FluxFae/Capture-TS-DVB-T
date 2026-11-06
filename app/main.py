@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -55,6 +55,11 @@ async def broadcast_state(state: dict) -> None:
     await _fan_out({"type": "state", **state})
 
 
+async def broadcast_report(status: dict) -> None:
+    """Announce that the report card has something new to show (S4, L3a)."""
+    await _fan_out({"type": "report", **status})
+
+
 def sync_log_callback(message: str) -> None:
     """Thread-safe log callback — schedules async broadcast."""
     if _main_loop and _main_loop.is_running():
@@ -65,6 +70,12 @@ def sync_state_callback(state: dict) -> None:
     """Thread-safe state callback — schedules async broadcast."""
     if _main_loop and _main_loop.is_running():
         asyncio.run_coroutine_threadsafe(broadcast_state(state), _main_loop)
+
+
+def sync_report_callback(status: dict) -> None:
+    """Thread-safe report callback — schedules async broadcast."""
+    if _main_loop and _main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(broadcast_report(status), _main_loop)
 
 
 async def shutdown_recordings(service: tsduck.TSDuckService | None = None) -> None:
@@ -87,6 +98,7 @@ async def lifespan(app: FastAPI):
     _main_loop = asyncio.get_running_loop()
     tsduck_service.set_log_callback(sync_log_callback)
     tsduck_service.set_state_callback(sync_state_callback)
+    tsduck_service.set_report_callback(sync_report_callback)
     try:
         yield
     finally:
@@ -305,20 +317,13 @@ async def stop_recording(request: Request):
 
 @app.get("/api/record/panel", response_class=HTMLResponse)
 async def get_recorder_panel(request: Request):
-    """Return recorder panel as HTML partial.
-
-    The response also carries the report card as an out-of-band swap: the browser
-    redraws this panel when a capture ends, and that is the only moment the report
-    for the finished file becomes real (S4, finding L3a).
-    """
+    """Return recorder panel as HTML partial."""
     return templates.TemplateResponse(
         request=request,
         name="partials/recorder_panel.html",
         context={
             "recording_state": tsduck_service.state.value,
             "current_recording": tsduck_service.current_recording,
-            "report_oob": True,
-            **_report_context(),
         },
     )
 
@@ -343,6 +348,40 @@ async def delete_recording(request: Request, filename: str):
         request=request,
         name="partials/recordings_table.html",
         context={"recordings": recordings},
+    )
+
+
+@app.get("/api/report/card", response_class=HTMLResponse)
+async def get_report_card(request: Request):
+    """Return the report card for the current report state (S4, L3a).
+
+    The browser asks for this when the WebSocket announces a new report: the card
+    cannot be driven by the recording state, because a capture emits its finished
+    ``IDLE`` state before the file has been analysed.
+    """
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/report_card.html",
+        context=_report_context(),
+    )
+
+
+@app.post("/api/report/analyze/{filename}", response_class=HTMLResponse)
+async def analyze_named_recording(request: Request, filename: str):
+    """Build the report for the recording the operator picked in the library (S10).
+
+    A name that escapes ``recordings_dir`` or does not exist is refused before
+    ``tsanalyze`` runs, and the refusal is a 404: the library only offers names it
+    listed, so anything else is a hand-written request.
+    """
+    built = await tsduck_service.analyze_recording(filename)
+    if built is None:
+        raise HTTPException(status_code=404, detail="Unknown recording")
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/report_card.html",
+        context=_report_context(),
     )
 
 

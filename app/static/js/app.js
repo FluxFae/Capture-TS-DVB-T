@@ -69,7 +69,20 @@ function handleWSMessage(data) {
         addLog(data.message);
     } else if (data.type === 'state') {
         updateTelemetry(data);
+    } else if (data.type === 'report') {
+        // The analysis announces itself when it is done: the finished recording
+        // state arrives before the file has been analysed, so a redraw driven by
+        // that state would always paint the previous report (S4, L3a).
+        refreshReportCard();
     }
+}
+
+function refreshReportCard() {
+    if (typeof htmx === 'undefined') return;
+    htmx.ajax('GET', '/api/report/card', {
+        target: '#report-section-body',
+        swap: 'innerHTML',
+    });
 }
 
 // ═══════════════ Telemetry Updates ═══════════════

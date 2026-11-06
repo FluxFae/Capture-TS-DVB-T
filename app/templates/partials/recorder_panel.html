@@ -101,13 +101,3 @@
     </div>
 </div>
 {% endif %}
-
-{#- S4/L3a: when a capture ends the browser only redraws the panel, so the report
-    card travels in the same response as an out-of-band swap. This block belongs to
-    the panel endpoint alone: rendering it inside the dashboard would produce a
-    second #report-section-body and a nested copy of the card. -#}
-{% if report_oob %}
-<div id="report-section-body" hx-swap-oob="innerHTML">
-    {% include "partials/report_card.html" %}
-</div>
-{% endif %}
