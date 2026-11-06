@@ -522,19 +522,33 @@ class TSDuckService:
     async def analyze_pending_capture(self) -> report.StreamReport | None:
         """Build the report the size gate left for the operator (S4).
 
-        Returns the report it built, the one already built, or ``None`` when
-        there is nothing to analyze. A failure is logged and reported as no
-        report, never as a fabricated one.
+        The offer belongs to one capture, so it carries its own target instead of
+        leaning on "whatever was recorded last": analysing ``_current_recording``
+        would describe a different file than the one the operator asked about, and
+        the report would end up tied to a capture that did not produce it (F1).
+
+        A capture in flight has no complete file to describe, and scanning one would
+        report on a half-written stream, so the request waits for it to finish.
+
+        Returns the report it built, the one already built, or ``None`` when there is
+        nothing to analyze. A failure is logged and reported as no report, never as a
+        fabricated one.
         """
         if self._current_report is not None:
             return self._current_report
 
-        rec = self._current_recording
-        if rec is None or not rec.filepath:
+        if self.state in (
+            RecordingState.TUNING,
+            RecordingState.RECORDING,
+            RecordingState.STOPPING,
+        ):
+            self._emit_log(
+                "Report on request skipped: a recording is in progress", "warning"
+            )
             return None
 
-        filepath = Path(rec.filepath)
-        if not filepath.exists():
+        filepath = self._report_target
+        if filepath is None or not filepath.exists():
             return None
 
         self._emit_log(f"Analyzing capture on request: {filepath.name}")
@@ -546,6 +560,9 @@ class TSDuckService:
             self._emit_log(f"Report failed: {error}", "error")
             return None
 
+        # The report describes this file and no other, so the L6 guard that drops a
+        # report when its recording disappears has an owner to compare against.
+        self._report_target = filepath
         self._report_pending_bytes = None
         return self._current_report
 
@@ -847,6 +864,11 @@ class TSDuckService:
             filename = f"capture_{freq_mhz}MHz_{ts}.ts"
 
         filepath = self.recordings_dir / filename
+
+        # The pending offer describes the capture that already ended, not the one
+        # about to start: leaving it in place shows a button that would analyse the
+        # wrong file (F1). A report already built keeps its own target.
+        self._report_pending_bytes = None
 
         self._current_recording = RecordingInfo(
             filename=filename,
