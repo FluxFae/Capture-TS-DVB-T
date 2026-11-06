@@ -147,16 +147,38 @@ class TSDuckService:
         self._report_callback: Callable[[dict], None] | None = None
         self._current_report: report.StreamReport | None = None
         self._report_pending_bytes: int | None = None
+        # The file the card is talking about, analysed or still waiting for the
+        # operator. A report outlives a page reload on purpose, but never its own
+        # file (L6).
+        self._report_target: Path | None = None
 
     @property
     def current_report(self) -> report.StreamReport | None:
-        """The report of the last capture that finished, if one was built."""
+        """The report of the last capture that finished, if one was built.
+
+        The report survives a reload because it is process state, so it also has to
+        die with its file: a card still claiming an analysis of a deleted recording
+        is indistinguishable from a real one (L6).
+        """
+        self._drop_report_if_file_is_gone()
         return self._current_report
 
     @property
     def report_pending_bytes(self) -> int | None:
         """Size of a finished capture waiting for the operator to ask for it."""
+        self._drop_report_if_file_is_gone()
         return self._report_pending_bytes
+
+    def _forget_report(self) -> None:
+        self._current_report = None
+        self._report_pending_bytes = None
+        self._report_target = None
+
+    def _drop_report_if_file_is_gone(self) -> None:
+        if self._report_target is None:
+            return
+        if not self._report_target.exists():
+            self._forget_report()
 
     @property
     def state(self) -> RecordingState:
@@ -364,7 +386,6 @@ class TSDuckService:
             self._build_report_for(filepath)
         finally:
             self._emit_report()
-
     def _build_report_for(self, filepath: Path) -> None:
         try:
             file_size = filepath.stat().st_size
@@ -374,6 +395,7 @@ class TSDuckService:
 
         if not should_analyze_automatically(file_size):
             self._report_pending_bytes = file_size
+            self._report_target = Path(filepath).resolve()
             self._emit_log(
                 f"Capture is {self._format_size(file_size)}; "
                 "analyze it on request to build the report",
@@ -384,6 +406,7 @@ class TSDuckService:
         self._emit_log(f"Analyzing capture: {filepath.name}")
         try:
             self._current_report = self._run_tsanalyze_report(filepath)
+            self._report_target = Path(filepath).resolve()
         except Exception as error:
             # Best-effort background step: a broken report must never turn a
             # successful capture into a failure or kill the monitor thread.
@@ -412,8 +435,7 @@ class TSDuckService:
             self._emit_log(f"Refused to analyze {filename!r}: not a recording", "warning")
             return None
 
-        self._current_report = None
-        self._report_pending_bytes = None
+        self._forget_report()
         try:
             # Blocking on purpose inside a thread: a 5 GB capture takes ~40 s and
             # the event loop has a recording to poll.
@@ -427,6 +449,7 @@ class TSDuckService:
         self._emit_log(f"Analyzing recording: {candidate.name}")
         try:
             self._current_report = self._run_tsanalyze_report(candidate)
+            self._report_target = candidate
         except Exception as error:
             self._emit_log(f"Report failed for {candidate.name}: {error}", "error")
             return None
@@ -1074,6 +1097,11 @@ class TSDuckService:
 
         candidate.unlink()
         self._emit_log(f"Deleted recording: {candidate.name}")
+        if self._report_target == candidate:
+            # The card is describing this file: it goes with it, and the browser is
+            # told so the operator does not keep reading a report of nothing (L6).
+            self._forget_report()
+            self._emit_report()
         return True
 
     def _resolve_recording(self, filename: str) -> Path | None:
@@ -1100,10 +1128,12 @@ class TSDuckService:
 
     def _get_report_status(self) -> dict:
         """What changed about the report, for the announcement (S4, L3a)."""
-        current = self._current_report
+        # The guarded properties, not the raw fields: an announcement must never
+        # advertise a report whose file is already gone (L6).
+        current = self.current_report
         return {
             "source": current.source if current else None,
-            "pending_bytes": self._report_pending_bytes,
+            "pending_bytes": self.report_pending_bytes,
         }
 
     def _get_recording_status(self) -> dict:
