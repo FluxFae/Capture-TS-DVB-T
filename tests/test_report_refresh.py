@@ -291,3 +291,66 @@ class LibraryReportButtonTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportFollowsItsFileTest(unittest.TestCase):
+    """L6: a report about a file that no longer exists must never render.
+
+    The report lives in the server process, so it survives a page reload on
+    purpose (decided with the user). What it cannot do is outlive its own file:
+    the library offers deletion, and a card still claiming an analysis of a
+    deleted recording is a lie the operator cannot tell apart from a real one.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.service = tsduck.TSDuckService(recordings_dir=self.directory.name)
+        self.announcements = []
+        self.service.set_report_callback(self.announcements.append)
+        self.capture = Path(self.directory.name) / "capture_new.ts"
+        self.capture.write_bytes(b"\x47" * 4096)
+
+    def build_report(self):
+        with mock.patch.object(
+            self.service, "_run_tsanalyze_report", return_value=sample_report()
+        ):
+            self.service._analyze_finished_capture(self.capture)
+        self.assertIsNotNone(self.service.current_report)
+
+    def test_deleting_the_analysed_recording_clears_the_card(self):
+        self.build_report()
+
+        asyncio_run(self.service.delete_recording("capture_new.ts"))
+
+        self.assertIsNone(self.service.current_report)
+        self.assertEqual(
+            [{"source": None, "pending_bytes": None}], self.announcements[-1:]
+        )
+
+    def test_deleting_another_recording_keeps_the_report(self):
+        self.build_report()
+        other = Path(self.directory.name) / "capture_other.ts"
+        other.write_bytes(b"\x47" * 1024)
+
+        asyncio_run(self.service.delete_recording("capture_other.ts"))
+
+        self.assertIsNotNone(self.service.current_report)
+
+    def test_a_file_removed_behind_the_app_is_not_rendered(self):
+        self.build_report()
+
+        self.capture.unlink()
+
+        self.assertIsNone(self.service.current_report)
+
+    def test_a_deleted_capture_is_no_longer_offered_for_analysis(self):
+        with mock.patch.object(
+            tsduck, "should_analyze_automatically", return_value=False
+        ):
+            self.service._analyze_finished_capture(self.capture)
+        self.assertEqual(4096, self.service.report_pending_bytes)
+
+        asyncio_run(self.service.delete_recording("capture_new.ts"))
+
+        self.assertIsNone(self.service.report_pending_bytes)
