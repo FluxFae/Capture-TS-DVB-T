@@ -269,7 +269,13 @@ class LibraryReportButtonTest(unittest.TestCase):
         return reader.items
 
     def test_each_recording_offers_a_report_action(self):
-        posts = [b.get("hx-post") for b in self.buttons() if b.get("hx-post")]
+        # Scoped to this action: the row also carries reveal (T6) and delete, and
+        # widening the selector here would make the list unpinnable.
+        posts = [
+            b.get("hx-post")
+            for b in self.buttons()
+            if (b.get("hx-post") or "").startswith("/api/report/analyze/")
+        ]
 
         self.assertEqual(
             ["/api/report/analyze/capture_a.ts", "/api/report/analyze/capture_b.ts"],
@@ -277,7 +283,11 @@ class LibraryReportButtonTest(unittest.TestCase):
         )
 
     def test_the_action_swaps_the_card(self):
-        targets = {b.get("hx-target") for b in self.buttons() if b.get("hx-post")}
+        targets = {
+            b.get("hx-target")
+            for b in self.buttons()
+            if (b.get("hx-post") or "").startswith("/api/report/analyze/")
+        }
 
         self.assertEqual({"#report-section-body"}, targets)
 

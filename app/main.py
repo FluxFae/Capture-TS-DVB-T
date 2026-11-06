@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import FormData
+from starlette.responses import Response
 
 from app.services import devices
 from app.services import tsduck_service as tsduck
@@ -349,6 +350,25 @@ async def delete_recording(request: Request, filename: str):
         name="partials/recordings_table.html",
         context={"recordings": recordings},
     )
+
+
+@app.post("/api/recordings/{filename}/reveal", status_code=204)
+async def reveal_recording(filename: str):
+    """Show one recording in the platform file manager (S9).
+
+    The library only offers names it just listed, so a refused name is a
+    hand-written request: 404 for it, and 501 when this platform has no file
+    manager the app knows how to drive. Both are reported instead of failing
+    silently.
+    """
+    outcome = await tsduck_service.reveal_recording(filename)
+    if outcome is tsduck.RevealOutcome.UNKNOWN:
+        raise HTTPException(status_code=404, detail="Unknown recording")
+    if outcome is tsduck.RevealOutcome.UNSUPPORTED:
+        raise HTTPException(
+            status_code=501, detail="No supported file manager on this platform"
+        )
+    return Response(status_code=204)
 
 
 @app.get("/api/report/card", response_class=HTMLResponse)
