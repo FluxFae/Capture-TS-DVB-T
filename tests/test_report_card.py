@@ -133,3 +133,112 @@ class CaptureWithoutTablesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Cell:
+    def __init__(self, tag, attrs):
+        self.tag = tag
+        self.attrs = attrs
+        self.text = []
+
+    @property
+    def classes(self):
+        return set((self.attrs.get("class") or "").split())
+
+    @property
+    def alignment(self):
+        """The one alignment class that matters to the eye, if any."""
+        for name in ("flux-table__th--right", "flux-table__td--right"):
+            if name in self.classes:
+                return "right"
+        return "left"
+
+    def content(self):
+        return " ".join(self.text)
+
+
+class TableReader(HTMLParser):
+    """Collects table sections as cells, with their classes and text."""
+
+    def __init__(self):
+        super().__init__()
+        self.headers = []
+        self.rows = []
+        self.cell = None
+        self.row = None
+        self.in_thead = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "thead":
+            self.in_thead = True
+        elif tag == "tr":
+            self.row = []
+            if not self.in_thead:
+                self.rows.append(self.row)
+        elif tag in {"th", "td"}:
+            self.cell = Cell(tag, dict(attrs))
+            if self.in_thead:
+                self.headers.append(self.cell)
+            elif self.row is not None:
+                self.row.append(self.cell)
+
+    def handle_endtag(self, tag):
+        if tag == "thead":
+            self.in_thead = False
+        elif tag in {"th", "td"}:
+            self.cell = None
+
+    def handle_data(self, data):
+        if self.cell is not None:
+            cleaned = data.strip()
+            if cleaned:
+                self.cell.text.append(cleaned)
+
+
+def render_table(report_value) -> TableReader:
+    reader = TableReader()
+    reader.feed(templates.env.get_template(CARD).render(report=report_value))
+    return reader
+
+
+class ServicesTableTest(unittest.TestCase):
+    """L3b/L3c: the table is read by eye, so alignment and content both matter."""
+
+    def setUp(self):
+        self.table = render_table(sample_report("file capture_674MHz.ts"))
+
+    def test_the_table_is_present(self):
+        self.assertTrue(self.table.rows, "no services table rendered")
+
+    def test_each_header_is_aligned_with_its_own_column(self):
+        for index, header in enumerate(self.table.headers):
+            with self.subTest(column=header.content()):
+                data = self.table.rows[0][index]
+                self.assertEqual(header.alignment, data.alignment)
+
+    def test_the_provider_is_not_repeated_on_every_row(self):
+        # The provider string also lives inside a service name ("Mediaset Italia2
+        # HD"), so what must be gone is the dedicated cell, not every occurrence.
+        cells = [cell.content() for row in self.table.rows for cell in row]
+
+        self.assertNotIn("Mediaset", cells)
+        self.assertNotIn("PROVIDER", [h.content().upper() for h in self.table.headers])
+
+    def test_a_service_shows_the_video_and_audio_it_carries(self):
+        first = " ".join(cell.content() for cell in self.table.rows[0])
+
+        self.assertIn("AVC 1920x1080", first)
+        self.assertIn("MPEG-4 AAC ita", first)
+
+    def test_the_pid_column_explains_what_it_counts(self):
+        headers = {header.content().upper(): header for header in self.table.headers}
+        pid_header = next(h for text, h in headers.items() if text.startswith("PIDs".upper()))
+
+        self.assertIn("shared", (pid_header.attrs.get("title") or "").lower())
+
+    def test_the_unique_pid_total_is_labelled_as_unique(self):
+        rendered = templates.env.get_template(CARD).render(
+            report=sample_report("file capture_674MHz.ts")
+        )
+
+        self.assertIn("PIDs (unique)", rendered)

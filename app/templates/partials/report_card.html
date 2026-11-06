@@ -51,7 +51,8 @@
         </div>
         <div class="flux-metric flux-metric--inline">
             <span class="flux-metric__value--sm flux-metric__value--mono">{{ report.integrity.pids.total }}</span>
-            <span class="flux-metric__label--sm">PIDs</span>
+            <span class="flux-metric__label--sm"
+                  title="PIDs in the file, counted once. A PID shared by several services appears in each of their rows below, so the column adds up to more than this total.">PIDs (unique)</span>
         </div>
         <div class="flux-metric flux-metric--inline">
             <span class="flux-metric__value--sm flux-metric__value--mono">{{ report.integrity.bitrate_188 }}</span>
@@ -63,25 +64,38 @@
         </div>
     </div>
 
-    {#- Layer 2: the services and how many PIDs each one carries. -#}
+    {#- Layer 2: the services, the codecs they carry and how many PIDs each one uses.
+        The provider column is gone (L3c): the frequency scan already names it for the
+        whole mux, while the codecs are the one thing no other panel shows. -#}
     {% if report.services %}
     <div class="flux-table-container">
         <table class="flux-table">
             <thead>
                 <tr>
-                    <th>Service</th>
-                    <th>Provider</th>
-                    <th>PIDs</th>
-                    <th>bit/s @188</th>
+                    <th class="flux-table__th">Service</th>
+                    <th class="flux-table__th">Codecs</th>
+                    <th class="flux-table__th flux-table__th--right"
+                        title="PIDs this service uses. A PID shared with another service is counted in each row, so these do not add up to the unique total above.">PIDs</th>
+                    <th class="flux-table__th flux-table__th--right">bit/s @188</th>
                 </tr>
             </thead>
             <tbody>
                 {% for service in report.services %}
-                <tr>
-                    <td>{{ service.name or '—' }}</td>
-                    <td>{{ service.provider or '—' }}</td>
-                    <td>{{ service.pids|length }}</td>
-                    <td>{{ service.bitrate_188 }}</td>
+                <tr class="flux-table__row">
+                    <td class="flux-table__td flux-table__td--name">{{ service.name or '—' }}</td>
+                    <td class="flux-table__td">
+                        {% if service.video %}
+                        <span class="flux-codec flux-codec--video">{{ service.video }}</span>
+                        {% endif %}
+                        {% for track in service.audio %}
+                        <span class="flux-codec">{{ track }}</span>
+                        {% endfor %}
+                        {% if not service.video and not service.audio %}
+                        <span class="flux-text--muted">no media</span>
+                        {% endif %}
+                    </td>
+                    <td class="flux-table__td flux-table__td--right flux-table__td--mono">{{ service.pids|length }}</td>
+                    <td class="flux-table__td flux-table__td--right flux-table__td--mono">{{ service.bitrate_188 }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

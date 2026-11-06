@@ -11,6 +11,7 @@ analysis table, per-PID section repetition) are deliberately absent.
 """
 
 import json
+import re
 from dataclasses import dataclass
 
 
@@ -68,7 +69,13 @@ class GlobalPids:
 
 @dataclass(frozen=True)
 class Service:
-    """Layer 2, second block: one service and the PIDs it carries."""
+    """Layer 2, second block: one service and the PIDs it carries.
+
+    ``video`` and ``audio`` are a summary of the media those PIDs declare, built
+    from their descriptions (``AVC video (1920x1080, ...)`` -> ``AVC 1920x1080``).
+    ``provider`` is still parsed but is not rendered: the frequency scan already
+    named it for the whole mux, so a column repeating it says nothing new.
+    """
 
     id: int
     name: str
@@ -78,6 +85,8 @@ class Service:
     pcr_pid: int
     bitrate_188: int
     pids: tuple[PidInfo, ...]
+    video: str
+    audio: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -157,6 +166,11 @@ def _build_report(document: dict, source: str) -> StreamReport:
 
 
 def _service(entry: dict, known_pids: dict[int, PidInfo]) -> Service:
+    pids = tuple(
+        known_pids[number] for number in entry.get("pids", []) if number in known_pids
+    )
+    video, audio = _codec_summary(pids)
+
     return Service(
         id=entry["id"],
         name=entry.get("name", ""),
@@ -165,10 +179,43 @@ def _service(entry: dict, known_pids: dict[int, PidInfo]) -> Service:
         pmt_pid=entry.get("pmt-pid", 0),
         pcr_pid=entry.get("pcr-pid", 0),
         bitrate_188=entry.get("bitrate", 0),
-        pids=tuple(
-            known_pids[number] for number in entry.get("pids", []) if number in known_pids
-        ),
+        pids=pids,
+        video=video,
+        audio=audio,
     )
+
+
+# TSDuck describes a media PID as "<codec> video (<details>)" or "<codec> Audio
+# (<language>, ...)". Everything else a service carries — PMT, private sections,
+# DVB subtitles, MHP object carousels, stream descriptors — is not media and must
+# not be guessed into the summary.
+_VIDEO_DESCRIPTION = re.compile(r"^(?P<codec>.+?)\s+video\b", re.IGNORECASE)
+_AUDIO_DESCRIPTION = re.compile(r"^(?P<codec>.+?)\s+audio\b", re.IGNORECASE)
+_RESOLUTION = re.compile(r"\d{3,4}\s*[x×]\s*\d{3,4}")
+_LANGUAGE = re.compile(r"\(([a-z]{3})(?:,|\))")
+
+
+def _codec_summary(pids: tuple[PidInfo, ...]) -> tuple[str, tuple[str, ...]]:
+    """Summarise the media a service declares, in PID order."""
+    video = ""
+    audio: list[str] = []
+
+    for pid in pids:
+        video_match = _VIDEO_DESCRIPTION.match(pid.description)
+        if video_match:
+            if not video:
+                resolution = _RESOLUTION.search(pid.description)
+                codec = video_match.group("codec").strip()
+                video = f"{codec} {resolution.group(0)}" if resolution else codec
+            continue
+
+        audio_match = _AUDIO_DESCRIPTION.match(pid.description)
+        if audio_match:
+            codec = audio_match.group("codec").strip()
+            language = _LANGUAGE.search(pid.description)
+            audio.append(f"{codec} {language.group(1)}" if language else codec)
+
+    return video, tuple(audio)
 
 
 def _pid_info(entry: dict) -> PidInfo:
