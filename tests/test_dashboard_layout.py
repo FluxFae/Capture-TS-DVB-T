@@ -13,6 +13,7 @@ wraps the counters and redraws them on every panel refresh.
 import unittest
 from datetime import datetime
 from html.parser import HTMLParser
+from pathlib import Path
 
 from app.main import templates
 from app.services.tsduck_service import RecordingInfo
@@ -75,7 +76,8 @@ class TreeReader(HTMLParser):
                 return
 
 
-def render_dashboard(recording_state="idle", current_recording=None):
+def render_dashboard(recording_state="idle", current_recording=None, report=None,
+                     report_pending_bytes=None):
     rendered = templates.env.get_template(DASHBOARD).render(
         devices=[],
         selected_adapter=-1,
@@ -84,8 +86,8 @@ def render_dashboard(recording_state="idle", current_recording=None):
         recordings=[],
         recording_state=recording_state,
         current_recording=current_recording,
-        report=None,
-        report_pending_bytes=None,
+        report=report,
+        report_pending_bytes=report_pending_bytes,
     )
     reader = TreeReader()
     reader.feed(rendered)
@@ -215,6 +217,90 @@ class LiveCountersSurviveTest(unittest.TestCase):
         (panel,) = find_by_id(root, "recorder-panel")
 
         self.assertTrue(any(node.attrs.get("id") == "live-title" for node in panel.walk()))
+
+
+class BottomRowTest(unittest.TestCase):
+    """S2: the recorder's slot now holds the report, with the log beside it."""
+
+    def setUp(self):
+        _, self.root = render_dashboard()
+
+    def bottom_row(self):
+        rows = [
+            node
+            for node in self.root.walk()
+            if "flux-dashboard__row--bottom" in node.attrs.get("class", "")
+        ]
+        self.assertEqual(1, len(rows), "the bottom row must exist exactly once")
+        return rows[0]
+
+    def test_the_bottom_row_is_report_then_log(self):
+        cards = [
+            child.element_id
+            for child in self.bottom_row().children
+            if child.tag == "section"
+        ]
+
+        self.assertEqual(["report-section", "log-section"], cards)
+
+    def test_the_mux_table_and_the_library_keep_their_places(self):
+        order = [node.element_id for node in self.root.walk() if node.element_id]
+
+        self.assertLess(order.index("mux-section"), order.index("report-section"))
+        self.assertLess(order.index("log-section"), order.index("library-section"))
+
+    def test_the_report_card_renders_inside_its_swap_target(self):
+        (body,) = find_by_id(self.root, "report-section-body")
+
+        self.assertTrue(body.is_inside("report-section"))
+        self.assertTrue(body.contains("report-empty"))
+
+    def test_the_log_card_is_unchanged(self):
+        (log,) = find_by_id(self.root, "log-section")
+
+        self.assertTrue(log.contains("log-console"))
+
+
+class ReportActionsTargetExistingElementsTest(unittest.TestCase):
+    """A report action whose swap target is missing does nothing at all.
+
+    The analysis button lived in the partial before the card had a home on the
+    dashboard, so ``hx-target="#report-section-body"`` pointed at an element that
+    did not exist. Every action rendered by the card is checked here against the
+    page it is actually delivered in.
+    """
+
+    def page_and_card(self, report=None, report_pending_bytes=None):
+        _, root = render_dashboard(report=report, report_pending_bytes=report_pending_bytes)
+        card = templates.env.get_template("partials/report_card.html").render(
+            report=report, report_pending_bytes=report_pending_bytes
+        )
+        reader = TreeReader()
+        reader.feed(card)
+        return root, reader.root
+
+    def test_a_pending_capture_can_actually_be_analyzed(self):
+        root, card = self.page_and_card(report_pending_bytes=524_288_000)
+        (button,) = [
+            node for node in card.walk() if node.element_id == "report-analyze-button"
+        ]
+        target = button.attrs["hx-target"].lstrip("#")
+
+        self.assertEqual(1, len(find_by_id(root, target)), f"#{target} is not on the page")
+
+    def test_a_ready_report_is_labelled_inside_the_bottom_row(self):
+        from app.services import report as report_module
+
+        raw = Path(__file__).resolve().parent / "fixtures" / "tsanalyze_674mhz.json"
+        parsed = report_module.parse_tsanalyze_json(
+            raw.read_text(encoding="utf-8"), source="file capture.ts"
+        )
+        _, root = render_dashboard(report=parsed)
+        (source,) = find_by_id(root, "report-source")
+
+        self.assertTrue(source.is_inside("report-section-body"))
+        self.assertTrue(source.is_inside("report-section"))
+        self.assertIn("file capture.ts", render_dashboard(report=parsed)[0])
 
 
 if __name__ == "__main__":
