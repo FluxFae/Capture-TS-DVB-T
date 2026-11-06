@@ -158,8 +158,21 @@
         </div>
     </section>
 
-    <!-- ═══════════════ ROW 3: Log ═══════════════ -->
+    <!-- ═══════════════ ROW 3: Stream Report + Log ═══════════════ -->
     <div class="flux-dashboard__row flux-dashboard__row--bottom">
+
+        <!-- Stream Report -->
+        <section class="flux-card flux-card--report" id="report-section">
+            <div class="flux-card__header">
+                <div class="flux-card__header-title">
+                    <i data-lucide="file-bar-chart" class="flux-card__icon"></i>
+                    <h2>Stream Report</h2>
+                </div>
+            </div>
+            <div id="report-section-body">
+                {% include "partials/report_card.html" %}
+            </div>
+        </section>
 
         <!-- Technical Log -->
         <section class="flux-card flux-card--log" id="log-section">
