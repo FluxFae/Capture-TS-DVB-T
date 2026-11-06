@@ -203,7 +203,13 @@ class LiveCountersSurviveTest(unittest.TestCase):
 
         self.assertTrue(panel.contains("recorder-form"))
 
-    def test_a_running_capture_still_renders_its_live_summary(self):
+    def test_a_running_capture_does_not_repeat_its_counters(self):
+        """L8b: the panel used to print the megabytes and seconds a second time.
+
+        The counters above the panel are the live truth; a summary line repeating
+        them read as the same information said twice, which is what the operator
+        objected to. The panel's job is the controls, not the numbers.
+        """
         recording = RecordingInfo(
             filename="capture.ts",
             filepath="recordings/capture.ts",
@@ -216,7 +222,7 @@ class LiveCountersSurviveTest(unittest.TestCase):
         _, root = render_dashboard("recording", recording)
         (panel,) = find_by_id(root, "recorder-panel")
 
-        self.assertTrue(any(node.attrs.get("id") == "live-title" for node in panel.walk()))
+        self.assertFalse(any(node.attrs.get("id") == "live-title" for node in panel.walk()))
 
 
 class BottomRowTest(unittest.TestCase):

@@ -91,32 +91,18 @@ let lastFileSize = 0;
 let lastUpdateTime = Date.now();
 let lastKnownState = 'IDLE';
 
-// The recorder panel is only redrawn when a capture starts or stops, so the
-// "recording…" line is kept honest here: it switches from "starting" to the
-// live counter on the first locked state and then follows the telemetry.
+// The recorder panel is not redrawn while a capture runs, so the "starting…" line
+// would otherwise still claim to be waiting long after the first byte. The counters
+// above already carry FILE SIZE and DURATION, so this block says only what they
+// cannot: that nothing has arrived yet. Once data flows, it goes away (L8b).
 function updateRecorderLive(data) {
     const live = document.querySelector('.flux-record-summary--live');
     if (!live) return;
 
-    const title = live.querySelector('#live-title');
-    const detail = live.querySelector('#live-detail');
-    if (!title || !detail) return;
-
     const state = (data.state || 'idle').toLowerCase();
-    if (state !== 'recording' && state !== 'tuning') return;
+    if (state === 'tuning') return;
 
-    if (state === 'tuning') {
-        title.textContent = 'Starting recording…';
-        detail.textContent = 'Waiting for the first data…';
-        return;
-    }
-
-    const target = live.dataset.target ? Number(live.dataset.target) : 0;
-    const captured = Math.floor(Number(data.duration || 0));
-    title.textContent = 'Recording';
-    detail.textContent = target
-        ? `${target}s target, ${captured}s captured`
-        : `${captured}s captured, no limit`;
+    live.remove();
 }
 
 function updateTelemetry(data) {
@@ -176,14 +162,20 @@ function updateTelemetry(data) {
         lastUpdateTime = now;
     }
 
-    // Progress indicator
+    // The rate is a speed of the file being written: with no live capture there is
+    // nothing to measure, so the last value must not stay frozen on screen (L8a).
+    if (bitrateEl && (data.state === 'idle' || data.state === 'error')) {
+        bitrateEl.textContent = '—';
+        lastFileSize = 0;
+    }
+
+    // Progress indicator: the bar alone. It used to carry a label repeating the
+    // megabytes and seconds already printed above it (L8b).
     if (progressEl) {
         if (data.state === 'recording') {
             progressEl.style.display = 'block';
             const fill = progressEl.querySelector('#progress-fill');
             if (fill) fill.style.width = '100%';
-            const label = progressEl.querySelector('#progress-label');
-            if (label) label.textContent = `Recording: ${data.file_size_display || '0 B'} — ${data.duration_display || '00:00'}`;
         } else {
             progressEl.style.display = 'none';
         }
