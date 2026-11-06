@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -53,8 +54,40 @@ def should_analyze_automatically(file_size: int) -> bool:
     return 0 < file_size <= AUTO_ANALYZE_MAX_BYTES
 
 
+def reveal_command(path: Path, platform: str | None = None) -> list[str] | None:
+    """The file-manager command that reveals ``path``, or ``None`` (S9).
+
+    Pure and platform-parameterised on purpose: what gets launched is the risky
+    part of the action, so it is decided here and tested without spawning
+    anything. ``platform`` defaults to ``sys.platform`` and exists only so the
+    other platforms can be pinned from a test.
+
+    Windows and macOS can select the file itself. ``xdg-open`` has no "select
+    this file" verb, so on Linux the containing folder is opened: an honest,
+    smaller promise instead of a silent lie in the button's label.
+    """
+    target = sys.platform if platform is None else platform
+    if target == "win32":
+        # Explorer's own switches use a comma right after /select with no space,
+        # and it exits non-zero even when it succeeds, so its status is never read.
+        return ["explorer", f"/select,{path}"]
+    if target == "darwin":
+        return ["open", "-R", str(path)]
+    if target.startswith(("linux", "freebsd")):
+        return ["xdg-open", str(path.parent)]
+    return None
+
+
 class NoServicesSelectedError(ValueError):
     """Raised when a service filter is requested but names no service."""
+
+
+class RevealOutcome(str, Enum):
+    """What happened when the operator asked to see a recording (S9)."""
+
+    REVEALED = "revealed"
+    UNKNOWN = "unknown"
+    UNSUPPORTED = "unsupported"
 
 
 class RecordingState(str, Enum):
@@ -1088,6 +1121,49 @@ class TSDuckService:
                 "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
             })
         return recordings
+
+    async def reveal_recording(self, filename: str) -> RevealOutcome:
+        """Show one recording in the platform file manager (S9).
+
+        The name is resolved inside ``recordings_dir`` first: the reveal launches
+        a process, and a name that escapes the directory has to be refused before
+        anything runs. The same rule already guards delete and analyze.
+        """
+        candidate = self._resolve_recording(filename)
+        if candidate is None:
+            self._emit_log(f"Refused to reveal {filename!r}: not a recording", "warning")
+            return RevealOutcome.UNKNOWN
+
+        command = reveal_command(candidate)
+        if command is None:
+            self._emit_log(
+                "Cannot reveal the recording: no supported file manager here",
+                "warning",
+            )
+            return RevealOutcome.UNSUPPORTED
+
+        try:
+            self._launch_reveal(command)
+        except OSError as error:
+            # The command exists for this platform but is not installed (xdg-open
+            # is the usual absence). That is unavailability, not a crash.
+            self._emit_log(f"Cannot reveal the recording: {error}", "warning")
+            return RevealOutcome.UNSUPPORTED
+
+        self._emit_log(f"Revealed in the file manager: {candidate.name}")
+        return RevealOutcome.REVEALED
+
+    def _launch_reveal(self, command: list[str]) -> None:
+        """Hand the file to the platform's file manager and stop caring (S9).
+
+        Detached on purpose: the file manager is a GUI program the operator drives
+        and the app must not wait for it, nor inherit its output.
+        """
+        subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     async def delete_recording(self, filename: str) -> bool:
         """Delete a recording file, refusing any path outside the recordings dir."""

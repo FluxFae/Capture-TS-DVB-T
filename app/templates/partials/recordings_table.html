@@ -31,6 +31,13 @@
                             title="Analyze {{ rec.filename }} and show its report">
                         <i data-lucide="file-bar-chart" class="flux-icon--sm"></i>
                     </button>
+                    <button class="flux-btn flux-btn--ghost flux-btn--sm"
+                            hx-post="/api/recordings/{{ rec.filename }}/reveal"
+                            hx-swap="none"
+                            hx-indicator="this"
+                            title="Show {{ rec.filename }} in the file manager">
+                        <i data-lucide="folder-open" class="flux-icon--sm"></i>
+                    </button>
                     <button class="flux-btn flux-btn--ghost flux-btn--sm flux-btn--danger-hover"
                             hx-delete="/api/recordings/{{ rec.filename }}"
                             hx-target="#recordings-table"
