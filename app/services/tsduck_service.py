@@ -221,7 +221,30 @@ class TSDuckService:
 
     @property
     def current_recording(self) -> RecordingInfo | None:
-        return self._current_recording
+        """The capture the telemetry describes, or ``None`` when it lost its file.
+
+        The counters describe a recorded file, so a finished capture whose file is
+        gone must not keep claiming megabytes and seconds after a reload (L8a).
+        Guarded at read time like the report (L6), so no code path can leave the
+        card lying about a file that no longer exists.
+
+        Two states are deliberately untouched: a capture that is still running
+        (``tsp`` writes the file a moment after tuning, so a missing file is the
+        normal gap before the first byte) and a failure that never produced a file
+        (that recording carries the error the panel has to show).
+        """
+        recording = self._current_recording
+        if recording is not None and self._finished_capture_is_gone(recording):
+            self._current_recording = None
+            return None
+        return recording
+
+    @staticmethod
+    def _finished_capture_is_gone(recording: RecordingInfo) -> bool:
+        """Whether this recording is a finished capture whose file disappeared."""
+        if recording.state is not RecordingState.IDLE or recording.file_size_bytes == 0:
+            return False
+        return not Path(recording.filepath).is_file()
 
     def set_log_callback(self, callback: Callable[[str], None]) -> None:
         self._log_callback = callback
@@ -1173,6 +1196,12 @@ class TSDuckService:
 
         candidate.unlink()
         self._emit_log(f"Deleted recording: {candidate.name}")
+        current = self._current_recording
+        if current is not None and Path(current.filepath) == candidate:
+            # The counters describe this file: they go with it, and the browser is
+            # told so the card does not keep printing a deleted capture (L8a).
+            self._current_recording = None
+            self._emit_state(self._get_recording_status())
         if self._report_target == candidate:
             # The card is describing this file: it goes with it, and the browser is
             # told so the operator does not keep reading a report of nothing (L6).
@@ -1214,10 +1243,21 @@ class TSDuckService:
 
     def _get_recording_status(self) -> dict:
         """Get current recording status as a dict for WebSocket broadcast."""
-        if not self._current_recording:
-            return {"state": RecordingState.IDLE, "file_size": 0, "duration": 0}
+        # The guarded property, not the raw field: the browser must never be told
+        # about counters whose file is gone (L8a).
+        rec = self.current_recording
+        if not rec:
+            # The display fields are part of the empty shape on purpose: the page
+            # only overwrites a counter when it is given the text to print, so
+            # without them the last capture's numbers would stay on screen.
+            return {
+                "state": RecordingState.IDLE,
+                "file_size": 0,
+                "file_size_display": self._format_size(0),
+                "duration": 0,
+                "duration_display": self._format_duration(0),
+            }
 
-        rec = self._current_recording
         return {
             "state": rec.state.value,
             "last_error": rec.last_error,
