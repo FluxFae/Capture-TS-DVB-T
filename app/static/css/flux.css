@@ -254,14 +254,29 @@ html:not(.dark) {
   font-size: 10px; font-weight: 600; color: var(--flux-text-secondary);
   margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px;
 }
-.flux-metric--inline { flex-direction: row; gap: var(--space-sm); align-items: center; padding: var(--space-sm) var(--space-lg); }
-.flux-metric__value--sm { font-size: 14px; font-weight: 600; }
+.flux-metric--inline { flex-direction: row; gap: var(--space-sm); align-items: center; padding: var(--space-sm) var(--space-lg); }.flux-metric__value--sm { font-size: 14px; font-weight: 600; }
 .flux-metric__value--sm.flux-metric__value--mono { font-family: var(--font-mono); }
 .flux-metric__label--sm { font-size: 11px; color: var(--flux-text-secondary); }
 
 @media (max-width: 640px) {
   .flux-telemetry-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ── Recorder inside the telemetry card ── */
+.flux-recorder {
+  margin-top: var(--space-lg); padding-top: var(--space-lg);
+  border-top: 1px solid var(--flux-border);
+}
+.flux-recorder-controls {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-md);
+}
+.flux-recorder-controls .flux-form-group { margin-bottom: 0; }
+.flux-recorder-controls__modes { flex: 1 1 auto; min-width: 0; }
+.flux-recorder-controls__duration { flex: 0 0 88px; }
+.flux-recorder-controls__action { flex: 0 0 auto; white-space: nowrap; padding: 10px var(--space-lg); }
+.flux-radio-group--compact { gap: var(--space-md); flex-wrap: wrap; }
+.flux-recorder .flux-record-summary { margin-top: var(--space-md); }
+.flux-recorder .flux-alert { margin-bottom: var(--space-md); }
 
 /* ── DVB Triplet ── */
 .flux-dvb-triplet {

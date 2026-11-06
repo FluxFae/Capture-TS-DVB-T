@@ -14,50 +14,55 @@
 </div>
 {% endif %}
 
-<!-- Record mode selector -->
-<div class="flux-form-group">
-    <label class="flux-label">CAPTURE MODE</label>
-    <div class="flux-radio-group">
-        <label class="flux-radio-label">
-            <input type="radio" name="record_mode" value="full_mux" class="flux-radio" {{ checked_full }} onchange="toggleServiceSelection(this)">
-            <span>Full Mux</span>
-        </label>
-        <label class="flux-radio-label">
-            <input type="radio" name="record_mode" value="selected" class="flux-radio" {{ checked_selected }} onchange="toggleServiceSelection(this)">
-            <span>Selected Services</span>
-        </label>
+<!-- The controls share one row: the card is the narrow column of the top row,
+     so the mode toggle, the duration and the button cannot stack. -->
+<div class="flux-recorder-controls" id="recorder-controls">
+    <!-- Record mode selector -->
+    <div class="flux-form-group flux-recorder-controls__modes">
+        <label class="flux-label">CAPTURE MODE</label>
+        <div class="flux-radio-group flux-radio-group--compact">
+            <label class="flux-radio-label">
+                <input type="radio" name="record_mode" value="full_mux" class="flux-radio" {{ checked_full }} onchange="toggleServiceSelection(this)">
+                <span>Full Mux</span>
+            </label>
+            <label class="flux-radio-label">
+                <input type="radio" name="record_mode" value="selected" class="flux-radio" {{ checked_selected }} onchange="toggleServiceSelection(this)">
+                <span>Selected</span>
+            </label>
+        </div>
     </div>
-</div>
 
-<!-- Duration -->
-<div class="flux-form-group">
-    <label class="flux-label" for="duration">DURATION (seconds, 0 = unlimited)</label>
-    <input type="number" class="flux-input flux-input--mono"
-           name="duration" id="duration"
-           value="{{ duration_value }}" min="0" step="10">
-</div>
+    <!-- Duration -->
+    <div class="flux-form-group flux-recorder-controls__duration">
+        <label class="flux-label" for="duration">DURATION (S)</label>
+        <input type="number" class="flux-input flux-input--mono"
+               name="duration" id="duration"
+               value="{{ duration_value }}" min="0" step="10"
+               title="Seconds; 0 records until you press stop">
+    </div>
 
-<!-- Record / Stop Button -->
-{% if recording_state == 'recording' or recording_state == 'tuning' %}
-<button type="button" class="flux-btn flux-btn--danger flux-btn--full flux-btn--rec"
-        hx-post="/api/record/stop"
-        hx-target="#recorder-panel"
-        hx-swap="innerHTML">
-    <span class="flux-rec-pulse"></span>
-    <i data-lucide="square" class="flux-icon"></i>
-    <span>Stop Recording</span>
-</button>
-{% else %}
-<button type="button" class="flux-btn flux-btn--primary flux-btn--full flux-btn--rec"
-        hx-post="/api/record/start"
-        hx-target="#recorder-panel"
-        hx-swap="innerHTML"
-        hx-include="#tune-form, #recorder-form, #services-table"
-        id="btn-record">
-    <i data-lucide="circle" class="flux-icon"></i>
-    <span>Start Recording</span>
-</button>
-{% endif %}
+    <!-- Record / Stop Button -->
+    {% if recording_state == 'recording' or recording_state == 'tuning' %}
+    <button type="button" class="flux-btn flux-btn--danger flux-btn--rec flux-recorder-controls__action"
+            hx-post="/api/record/stop"
+            hx-target="#recorder-panel"
+            hx-swap="innerHTML">
+        <span class="flux-rec-pulse"></span>
+        <i data-lucide="square" class="flux-icon"></i>
+        <span>Stop</span>
+    </button>
+    {% else %}
+    <button type="button" class="flux-btn flux-btn--primary flux-btn--rec flux-recorder-controls__action"
+            hx-post="/api/record/start"
+            hx-target="#recorder-panel"
+            hx-swap="innerHTML"
+            hx-include="#tune-form, #recorder-form, #services-table"
+            id="btn-record">
+        <i data-lucide="circle" class="flux-icon"></i>
+        <span>Record</span>
+    </button>
+    {% endif %}
+</div>
 </form>
 
 {% if recording_state == 'tuning' or recording_state == 'recording' %}
