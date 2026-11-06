@@ -242,3 +242,45 @@ class ServicesTableTest(unittest.TestCase):
         )
 
         self.assertIn("PIDs (unique)", rendered)
+
+
+class BroadcastTripletTest(unittest.TestCase):
+    """L5: the header and the table speak the broadcast triplet TSID, ONID, SID."""
+
+    def render(self, report_value=None):
+        if report_value is None:
+            report_value = sample_report("file capture_674MHz.ts")
+        return templates.env.get_template(CARD).render(report=report_value)
+
+    def test_the_header_names_tsid_onid_services_and_country_in_order(self):
+        body = Markup()
+        body.feed(self.render())
+        text = body.body()
+
+        positions = [text.index(label) for label in ("TSID", "ONID", "SERVICES", "COUNTRY")]
+        self.assertEqual(sorted(positions), positions)
+
+    def test_the_header_shows_the_original_network_id(self):
+        self.assertIn("272", self.onid_value(self.render()))
+
+    def test_a_capture_without_tables_shows_no_network_identity(self):
+        empty = report.parse_tsanalyze_json(
+            NO_TABLES.read_text(encoding="utf-8"), source="file synthetic.ts"
+        )
+
+        self.assertEqual("—", self.onid_value(self.render(empty)))
+
+    def test_the_table_starts_with_the_service_id_in_decimal(self):
+        table = render_table(sample_report("file capture_674MHz.ts"))
+
+        self.assertEqual("SID", table.headers[0].content())
+        self.assertEqual("101", table.rows[0][0].content())
+        self.assertEqual("R101 TV", table.rows[0][1].content())
+
+    def onid_value(self, rendered):
+        import re
+
+        match = re.search(r'id="report-onid"[^>]*>([^<]*)<', rendered)
+        if match is None:
+            self.fail("the ONID cell is not rendered")
+        return match.group(1).strip()

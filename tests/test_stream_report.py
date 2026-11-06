@@ -8,6 +8,7 @@ so these assertions describe what TSDuck actually emits, not what we imagined.
 
 import asyncio
 import dataclasses
+import json
 import subprocess
 import unittest
 from pathlib import Path
@@ -150,6 +151,39 @@ class SourceLabelTest(unittest.TestCase):
         self.assertIs(dataclasses.MISSING, field.default_factory)
 
 
+class NetworkIdentityTest(unittest.TestCase):
+    """L5: broadcast identifies a service with the triplet TSID, ONID, SID.
+
+    TSID is a property of the mux and lives in ``ts.id``; the original network id
+    (ONID) only exists per service in the ``tsanalyze --json`` document, so the
+    report projects the distinct values instead of inventing a top-level one.
+    """
+
+    def setUp(self):
+        self.report = parsed()
+
+    def test_the_mux_reports_the_original_network_id_of_its_services(self):
+        self.assertEqual((272,), self.report.original_network_ids)
+
+    def test_a_capture_without_tables_reports_no_network_identity(self):
+        empty = report.parse_tsanalyze_json(
+            NO_TABLES_FIXTURE.read_text(encoding="utf-8"), source="file synthetic.ts"
+        )
+
+        self.assertEqual((), empty.original_network_ids)
+
+    def test_services_from_different_original_networks_are_all_kept(self):
+        document = json.loads(RAW)
+        document["services"][1]["original-network-id"] = 999
+
+        mixed = report.parse_tsanalyze_json(json.dumps(document), source="file mixed.ts")
+
+        self.assertEqual((272, 999), mixed.original_network_ids)
+
+    def test_the_service_id_is_kept_in_decimal_for_the_triplet(self):
+        self.assertEqual(101, self.report.services[0].id)
+
+
 class CodecSummaryTest(unittest.TestCase):
     """L3c: the provider column is worth more as the codecs the service carries.
 
@@ -232,7 +266,13 @@ class LayerBoundaryTest(unittest.TestCase):
     """S7 renders layers 1 and 2; layers 3 and 4 must never reach the model."""
 
     EXACT_FIELDS = {
-        "StreamReport": {"source", "integrity", "global_pids", "services"},
+        "StreamReport": {
+            "source",
+            "integrity",
+            "global_pids",
+            "services",
+            "original_network_ids",
+        },
         "Integrity": {
             "transport_stream_id",
             "service_count",
