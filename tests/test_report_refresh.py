@@ -1,159 +1,292 @@
-"""The report card must follow the capture that just ended.
+"""The report card must be told about a report the moment it exists.
 
-``openspec/changes/stream-report-ui`` S4, plus finding L3a from real use: a second
-recording finished below the gate, the server analysed it, and the screen kept
-showing the previous report — the operator had no way to know the analysis had run.
+``openspec/changes/stream-report-ui`` S4, finding L3a and L4. Two attempts died here
+before, so the rule is spelled out:
 
-The panel is redrawn over the WebSocket when a capture ends, so the report card
-rides along in that same response as an HTMX out-of-band swap. That keeps the whole
-contract server-side and testable: no extra request, no JavaScript bookkeeping.
+1. The old card only changed when the operator pressed "Analyze capture".
+2. The first fix delivered the card inside the recorder-panel response. It looked
+   right and still failed, because ``_run_recording`` emits the finished ``IDLE``
+   state *before* it analyses the file: the browser redrew the panel while the
+   previous report was still the current one, and the new analysis arrived with
+   nobody listening.
+
+So the announcement must come from the analysis itself, after it is done — which is
+what these tests pin: the service emits a report status when a report is built, when
+a capture is parked above the size gate, and when the analysis fails (the card must
+never be left showing a report that is no longer current).
 """
 
+import tempfile
 import unittest
-from html.parser import HTMLParser
 from pathlib import Path
+from unittest import mock
 
-from app.main import templates
+# The behaviour under test lives in the service; the template side of the contract
+# (the card endpoint and the library button) is pinned in test_report_card and
+# test_dashboard_layout.
 from app.services import report
+from app.services import tsduck_service as tsduck
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "tsanalyze_674mhz.json"
-PANEL = "partials/recorder_panel.html"
-REPORT_BODY = "report-section-body"
 
 
-class Element:
-    def __init__(self, tag, attrs, parent=None):
-        self.tag = tag
-        self.attrs = attrs
-        self.parent = parent
-        self.children = []
-
-    @property
-    def element_id(self):
-        return self.attrs.get("id")
-
-    def walk(self):
-        yield self
-        for child in self.children:
-            yield from child.walk()
-
-
-class Tags(HTMLParser):
-    """A tree, because "inside the out-of-band block" is the question that matters."""
-
-    VOID = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input",
-                      "link", "meta", "source", "track", "wbr"})
-
-    def __init__(self):
-        super().__init__()
-        self.root = Element("[document]", {})
-        self.stack = [self.root]
-        self.text = []
-
-    def handle_starttag(self, tag, attrs):
-        node = Element(tag, dict(attrs), self.stack[-1])
-        self.stack[-1].children.append(node)
-        if tag not in self.VOID:
-            self.stack.append(node)
-
-    def handle_endtag(self, tag):
-        for index in range(len(self.stack) - 1, 0, -1):
-            if self.stack[index].tag == tag:
-                del self.stack[index:]
-                return
-
-    def handle_data(self, data):
-        cleaned = data.strip()
-        if cleaned:
-            self.text.append(cleaned)
-
-    def by_id(self, identifier):
-        return [node for node in self.root.walk() if node.element_id == identifier]
-
-    def body(self):
-        return " ".join(self.text)
-
-
-def render_panel(report_value=None, pending=None, report_oob=False):
-    html = templates.env.get_template(PANEL).render(
-        recording_state="idle",
-        current_recording=None,
-        report=report_value,
-        report_pending_bytes=pending,
-        report_oob=report_oob,
-    )
-    markup = Tags()
-    markup.feed(html)
-    return markup
-
-
-def delivered_body(markup):
-    (body,) = markup.by_id(REPORT_BODY)
-    return body
-
-
-def sample_report():
+def sample_report(source="file capture_new.ts"):
     return report.parse_tsanalyze_json(
-        FIXTURE.read_text(encoding="utf-8"), source="file capture_674MHz_new.ts"
+        FIXTURE.read_text(encoding="utf-8"), source=source
     )
 
 
-class PanelCarriesTheReportTest(unittest.TestCase):
-    """A redraw of the recorder panel also delivers the current report."""
+class ReportAnnouncementTest(unittest.TestCase):
+    """``_analyze_finished_capture`` is the only thing that knows a report exists."""
 
-    def test_a_finished_analysis_reaches_the_card(self):
-        markup = render_panel(report_value=sample_report(), report_oob=True)
-        body = delivered_body(markup)
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.service = tsduck.TSDuckService(recordings_dir=self.directory.name)
+        self.announcements = []
+        self.service.set_report_callback(self.announcements.append)
+        self.capture = Path(self.directory.name) / "capture_new.ts"
+        self.capture.write_bytes(b"\x47" * 32_768)
+        self.previous = sample_report("file capture_previous.ts")
+        self.service._current_report = self.previous
 
-        self.assertEqual("innerHTML", body.attrs.get("hx-swap-oob"))
-        ids = [node.element_id for node in body.walk() if node.element_id]
-        self.assertIn("report-content", ids)
-        self.assertIn("file capture_674MHz_new.ts", markup.body())
+    def test_a_built_report_is_announced_with_its_source(self):
+        with mock.patch.object(
+            self.service, "_run_tsanalyze_report", return_value=sample_report()
+        ):
+            self.service._analyze_finished_capture(self.capture)
 
-    def test_a_capture_over_the_gate_delivers_the_analyze_button(self):
-        """L3a: the operator must see the button appear, not discover it by luck."""
+        self.assertEqual(1, len(self.announcements), "the card was never told")
+        self.assertEqual("file capture_new.ts", self.announcements[0]["source"])
+        self.assertIsNone(self.announcements[0]["pending_bytes"])
 
-        markup = render_panel(pending=900 * 1024 * 1024, report_oob=True)
-        body = delivered_body(markup)
+    def test_a_capture_above_the_gate_is_announced_as_waiting(self):
+        with mock.patch.object(
+            tsduck, "should_analyze_automatically", return_value=False
+        ):
+            self.service._analyze_finished_capture(self.capture)
 
-        self.assertEqual("innerHTML", body.attrs.get("hx-swap-oob"))
-        self.assertIn("report-analyze-button", [n.element_id for n in body.walk()])
+        self.assertEqual(1, len(self.announcements))
+        self.assertIsNone(self.announcements[0]["source"])
+        self.assertEqual(32_768, self.announcements[0]["pending_bytes"])
 
-    def test_the_empty_state_is_delivered_too(self):
-        """A failed capture clears the previous report; the card must say so."""
+    def test_a_failed_analysis_is_announced_as_no_report(self):
+        """L3a: leaving the previous report on screen is the defect being fixed."""
 
-        body = delivered_body(render_panel(report_oob=True))
-        inner = [
-            node.element_id
-            for child in body.children
-            for node in child.walk()
-            if node.element_id
-        ]
+        with mock.patch.object(
+            self.service,
+            "_run_tsanalyze_report",
+            side_effect=report.ReportParseError("tsanalyze failed"),
+        ):
+            self.service._analyze_finished_capture(self.capture)
 
-        self.assertEqual(["report-empty"], inner)
+        self.assertEqual(1, len(self.announcements))
+        self.assertIsNone(self.announcements[0]["source"])
+        self.assertIsNone(self.announcements[0]["pending_bytes"])
+        self.assertIsNone(self.service.current_report)
+
+    def test_the_announcement_happens_after_the_report_is_current(self):
+        """The old ordering bug, stated directly: announce, then be stale."""
+
+        seen = []
+        self.service.set_report_callback(
+            lambda status: seen.append((status["source"], self.service.current_report))
+        )
+        with mock.patch.object(
+            self.service, "_run_tsanalyze_report", return_value=sample_report()
+        ):
+            self.service._analyze_finished_capture(self.capture)
+
+        announced_source, current = seen[0]
+        self.assertEqual("file capture_new.ts", announced_source)
+        self.assertIsNotNone(current)
+        self.assertEqual(announced_source, current.source)
+
+    def test_a_service_without_callbacks_still_analyses(self):
+        self.service.set_report_callback(lambda status: None)
+        with mock.patch.object(
+            self.service, "_run_tsanalyze_report", return_value=sample_report()
+        ):
+            self.service._analyze_finished_capture(self.capture)
+
+        self.assertIsNotNone(self.service.current_report)
 
 
-class ThePageNeverDuplicatesItTest(unittest.TestCase):
-    """The same partial is included in the dashboard, where no swap exists.
+class OnDemandReportTest(unittest.TestCase):
+    """L4: any recording in the library can be analysed on request (S10)."""
 
-    If the out-of-band block were unconditional, the page would carry a second
-    ``#report-section-body`` and a nested copy of the card.
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.service = tsduck.TSDuckService(recordings_dir=self.directory.name)
+        self.target = Path(self.directory.name) / "capture_old.ts"
+        self.target.write_bytes(b"\x47" * 4096)
+
+    def test_an_existing_recording_can_be_analysed_by_name(self):
+        with mock.patch.object(
+            self.service, "_run_tsanalyze_report", return_value=sample_report()
+        ) as analyzer:
+            built = asyncio_run(self.service.analyze_recording("capture_old.ts"))
+
+        self.assertIsNotNone(built)
+        self.assertEqual(self.target, Path(analyzer.call_args.args[0]))
+        self.assertIs(built, self.service.current_report)
+
+    def test_it_replaces_the_previous_report_instead_of_keeping_both(self):
+        self.service._current_report = sample_report("file capture_previous.ts")
+        with mock.patch.object(
+            self.service, "_run_tsanalyze_report", return_value=sample_report()
+        ):
+            built = asyncio_run(self.service.analyze_recording("capture_old.ts"))
+
+        if built is None:
+            self.fail("the recording was not analysed")
+        self.assertEqual("file capture_new.ts", built.source)
+        self.assertIs(built, self.service.current_report)
+
+    def test_a_failed_analysis_leaves_no_report_behind(self):
+        self.service._current_report = sample_report("file capture_previous.ts")
+        with mock.patch.object(
+            self.service,
+            "_run_tsanalyze_report",
+            side_effect=report.ReportParseError("tsanalyze failed"),
+        ):
+            built = asyncio_run(self.service.analyze_recording("capture_old.ts"))
+
+        self.assertIsNone(built)
+        self.assertIsNone(self.service.current_report)
+
+    def test_a_name_outside_the_recordings_directory_is_refused(self):
+        victim = Path(self.directory.name).parent / "victim.ts"
+        victim.write_bytes(b"\x47")
+
+        for name in ("..\\victim.ts", "../victim.ts", str(victim)):
+            with self.subTest(name=name), mock.patch.object(
+                self.service, "_run_tsanalyze_report"
+            ) as analyzer:
+                self.assertIsNone(asyncio_run(self.service.analyze_recording(name)))
+                analyzer.assert_not_called()
+
+    def test_an_unknown_name_is_refused_without_running_anything(self):
+        with mock.patch.object(self.service, "_run_tsanalyze_report") as analyzer:
+            self.assertIsNone(asyncio_run(self.service.analyze_recording("nope.ts")))
+
+            analyzer.assert_not_called()
+
+    def test_a_non_ts_name_is_refused(self):
+        (Path(self.directory.name) / "notes.txt").write_text("x")
+
+        with mock.patch.object(self.service, "_run_tsanalyze_report") as analyzer:
+            self.assertIsNone(asyncio_run(self.service.analyze_recording("notes.txt")))
+
+            analyzer.assert_not_called()
+
+
+def asyncio_run(coroutine):
+    import asyncio
+
+    return asyncio.run(coroutine)
+
+
+class PanelStaysSinglePurposeTest(unittest.TestCase):
+    """The out-of-band copy is gone; the card has exactly one home on the page.
+
+    The first fix delivered the card inside the panel response. It is not only the
+    wrong moment (L3a); it also has to be removed to keep the panel partial usable
+    in the dashboard, where a second ``#report-section-body`` would appear.
     """
 
-    def test_the_dashboard_include_has_no_out_of_band_block(self):
-        markup = render_panel(report_value=sample_report(), report_oob=False)
+    def test_the_panel_carries_no_report_card(self):
+        from app.main import templates
 
-        self.assertEqual([], markup.by_id(REPORT_BODY))
-        self.assertNotIn("hx-swap-oob", str([n.attrs for n in markup.root.walk()]))
+        rendered = templates.env.get_template("partials/recorder_panel.html").render(
+            recording_state="idle", current_recording=None
+        )
 
-    def test_the_dashboard_renders_one_report_body(self):
-        from tests.test_dashboard_layout import render_dashboard
+        self.assertNotIn("hx-swap-oob", rendered)
+        self.assertNotIn("report-section-body", rendered)
 
-        html, root = render_dashboard()
-        bodies = [node for node in root.walk() if node.element_id == REPORT_BODY]
 
-        self.assertEqual(1, len(bodies))
-        self.assertNotIn("hx-swap-oob", html)
+class ReportCardEndpointTest(unittest.TestCase):
+    """The browser reads the card from one place, whatever changed it."""
+
+    def request(self):
+        from starlette.requests import Request
+
+        return Request({"type": "http", "method": "GET", "path": "/",
+                        "headers": [], "query_string": b""})
+
+    def test_the_card_endpoint_renders_the_current_state(self):
+        from app import main
+
+        main.tsduck_service._current_report = sample_report()
+        self.addCleanup(setattr, main.tsduck_service, "_current_report", None)
+
+        response = asyncio_run(main.get_report_card(self.request()))
+        body = bytes(response.body).decode()
+
+        self.assertIn("file capture_new.ts", body)
+        self.assertIn("report-content", body)
+
+    def test_the_card_endpoint_says_so_when_there_is_nothing(self):
+        from app import main
+
+        main.tsduck_service._current_report = None
+        response = asyncio_run(main.get_report_card(self.request()))
+
+        self.assertIn("report-empty", bytes(response.body).decode())
+
+
+class LibraryReportButtonTest(unittest.TestCase):
+    """L4: every recording in the library can be analysed on request."""
+
+    def render(self):
+        from app.main import templates
+
+        return templates.env.get_template("partials/recordings_table.html").render(
+            recordings=[
+                {"filename": "capture_a.ts", "size_display": "10 MB",
+                 "created": "2026-11-06T10:00:00"},
+                {"filename": "capture_b.ts", "size_display": "20 MB",
+                 "created": "2026-11-06T11:00:00"},
+            ]
+        )
+
+    def buttons(self):
+        from html.parser import HTMLParser
+
+        class Buttons(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.items = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "button":
+                    self.items.append(dict(attrs))
+
+        reader = Buttons()
+        reader.feed(self.render())
+        return reader.items
+
+    def test_each_recording_offers_a_report_action(self):
+        posts = [b.get("hx-post") for b in self.buttons() if b.get("hx-post")]
+
+        self.assertEqual(
+            ["/api/report/analyze/capture_a.ts", "/api/report/analyze/capture_b.ts"],
+            posts,
+        )
+
+    def test_the_action_swaps_the_card(self):
+        targets = {b.get("hx-target") for b in self.buttons() if b.get("hx-post")}
+
+        self.assertEqual({"#report-section-body"}, targets)
+
+    def test_the_delete_action_is_still_there(self):
+        deletes = [b.get("hx-delete") for b in self.buttons() if b.get("hx-delete")]
+
+        self.assertEqual(
+            ["/api/recordings/capture_a.ts", "/api/recordings/capture_b.ts"], deletes
+        )
 
 
 if __name__ == "__main__":

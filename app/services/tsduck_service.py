@@ -144,6 +144,7 @@ class TSDuckService:
         self._stop_event = threading.Event()
         self._log_callback: Callable[[str], None] | None = None
         self._state_callback: Callable[[dict], None] | None = None
+        self._report_callback: Callable[[dict], None] | None = None
         self._current_report: report.StreamReport | None = None
         self._report_pending_bytes: int | None = None
 
@@ -172,6 +173,24 @@ class TSDuckService:
 
     def set_state_callback(self, callback: Callable[[dict], None]) -> None:
         self._state_callback = callback
+
+    def set_report_callback(self, callback: Callable[[dict], None]) -> None:
+        """Register the announcement that "the report changed".
+
+        The card cannot be told by the recording state: a capture emits its
+        finished ``IDLE`` state before the file is analysed, so a redraw driven by
+        that state always shows the previous report. The analysis itself announces,
+        after ``_current_report`` is the truth (S4, finding L3a).
+        """
+        self._report_callback = callback
+
+    def _emit_report(self) -> None:
+        if self._report_callback is None:
+            return
+        try:
+            self._report_callback(self._get_report_status())
+        except Exception as error:  # pragma: no cover - defensive
+            self._emit_log(f"Report announcement failed: {error}", "warning")
 
     def _emit_log(self, message: str, level: str = "info") -> None:
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -332,10 +351,21 @@ class TSDuckService:
         report never races the file being written. A report that cannot be built
         must not disturb the recorder: the failure is logged and the capture is
         still reported as successful.
+
+        The announcement is in a ``finally`` on purpose: the card has to be told
+        about every outcome — a report, a capture parked above the gate, or a
+        failure — because the alternative is a screen still showing a report that
+        is no longer the current one (finding L3a).
         """
         self._current_report = None
         self._report_pending_bytes = None
 
+        try:
+            self._build_report_for(filepath)
+        finally:
+            self._emit_report()
+
+    def _build_report_for(self, filepath: Path) -> None:
         try:
             file_size = filepath.stat().st_size
         except OSError as error:
@@ -367,6 +397,48 @@ class TSDuckService:
             f"{integrity.packets.transport_errors} transport errors",
             level,
         )
+
+    async def analyze_recording(self, filename: str) -> report.StreamReport | None:
+        """Build the report for one recording the operator picked (S10).
+
+        Any recording in the library can be analysed, not only the one that just
+        finished: the auto path is a convenience, not the only way in. The name is
+        resolved inside ``recordings_dir`` before anything runs, and a report that
+        cannot be built clears the previous one instead of leaving the operator
+        reading a report about a different file.
+        """
+        candidate = self._resolve_recording(filename)
+        if candidate is None:
+            self._emit_log(f"Refused to analyze {filename!r}: not a recording", "warning")
+            return None
+
+        self._current_report = None
+        self._report_pending_bytes = None
+        try:
+            # Blocking on purpose inside a thread: a 5 GB capture takes ~40 s and
+            # the event loop has a recording to poll.
+            return await asyncio.to_thread(self._build_named_report, candidate)
+        finally:
+            # Same rule as a finished capture: whenever the report changes, the
+            # card is told, including when the change is "there is no report".
+            self._emit_report()
+
+    def _build_named_report(self, candidate: Path) -> report.StreamReport | None:
+        self._emit_log(f"Analyzing recording: {candidate.name}")
+        try:
+            self._current_report = self._run_tsanalyze_report(candidate)
+        except Exception as error:
+            self._emit_log(f"Report failed for {candidate.name}: {error}", "error")
+            return None
+
+        integrity = self._current_report.integrity
+        level = "success" if integrity.packets.transport_errors == 0 else "warning"
+        self._emit_log(
+            f"Report ready: {integrity.service_count} services, "
+            f"{integrity.packets.transport_errors} transport errors",
+            level,
+        )
+        return self._current_report
 
     async def analyze_pending_capture(self) -> report.StreamReport | None:
         """Build the report the size gate left for the operator (S4).
@@ -996,23 +1068,43 @@ class TSDuckService:
 
     async def delete_recording(self, filename: str) -> bool:
         """Delete a recording file, refusing any path outside the recordings dir."""
-        if not filename or Path(filename).suffix != ".ts":
-            return False
-
-        root = self.recordings_dir.resolve()
-        candidate = (root / filename).resolve()
-        # Backslashes are path separators on Windows, so a "filename" such as
-        # "..\\victim.ts" would otherwise escape the recordings directory.
-        if candidate.parent != root or not candidate.is_file():
+        candidate = self._resolve_recording(filename)
+        if candidate is None:
             return False
 
         candidate.unlink()
         self._emit_log(f"Deleted recording: {candidate.name}")
         return True
 
+    def _resolve_recording(self, filename: str) -> Path | None:
+        """Resolve a library name inside ``recordings_dir``, or ``None``.
+
+        One rule for every action that takes a name from the browser (delete,
+        reveal, analyze): a name that escapes the recordings directory must be
+        refused before a file is touched or a process is launched. Backslashes are
+        path separators on Windows, so a "filename" such as ``..\\victim.ts``
+        would otherwise walk out of the directory.
+        """
+        if not filename or Path(filename).suffix != ".ts":
+            return None
+
+        root = self.recordings_dir.resolve()
+        candidate = (root / filename).resolve()
+        if candidate.parent != root or not candidate.is_file():
+            return None
+        return candidate
+
     # ──────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────
+
+    def _get_report_status(self) -> dict:
+        """What changed about the report, for the announcement (S4, L3a)."""
+        current = self._current_report
+        return {
+            "source": current.source if current else None,
+            "pending_bytes": self._report_pending_bytes,
+        }
 
     def _get_recording_status(self) -> dict:
         """Get current recording status as a dict for WebSocket broadcast."""
