@@ -305,13 +305,20 @@ async def stop_recording(request: Request):
 
 @app.get("/api/record/panel", response_class=HTMLResponse)
 async def get_recorder_panel(request: Request):
-    """Return recorder panel as HTML partial."""
+    """Return recorder panel as HTML partial.
+
+    The response also carries the report card as an out-of-band swap: the browser
+    redraws this panel when a capture ends, and that is the only moment the report
+    for the finished file becomes real (S4, finding L3a).
+    """
     return templates.TemplateResponse(
         request=request,
         name="partials/recorder_panel.html",
         context={
             "recording_state": tsduck_service.state.value,
             "current_recording": tsduck_service.current_recording,
+            "report_oob": True,
+            **_report_context(),
         },
     )
 
