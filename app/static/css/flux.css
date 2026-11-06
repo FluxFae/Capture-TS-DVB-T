@@ -318,6 +318,13 @@ html:not(.dark) {
 
 .flux-service-name { color: var(--flux-text); }
 
+/* Codec summary inside the report's services table (L3c) */
+.flux-codec {
+  display: block; font-family: var(--font-mono); font-size: 11px;
+  color: var(--flux-text-secondary); white-space: nowrap;
+}
+.flux-codec--video { color: var(--flux-text); }
+
 /* ── Log Console ── */
 .flux-log {
   background: var(--flux-bg); border: 1px solid var(--flux-border);

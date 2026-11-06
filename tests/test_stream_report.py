@@ -150,6 +150,84 @@ class SourceLabelTest(unittest.TestCase):
         self.assertIs(dataclasses.MISSING, field.default_factory)
 
 
+class CodecSummaryTest(unittest.TestCase):
+    """L3c: the provider column is worth more as the codecs the service carries.
+
+    The frequency scan already names the provider for the whole mux, so repeating
+    "Mediaset" on every row costs a column and says nothing new. What the operator
+    cannot see anywhere else is which video and audio each service really uses.
+    """
+
+    def setUp(self):
+        self.report = parsed()
+
+    def service(self, sid):
+        return next(item for item in self.report.services if item.id == sid)
+
+    def test_a_video_pid_is_summarised_with_codec_and_resolution(self):
+        self.assertEqual("AVC 1920x1080", self.service(101).video)
+
+    def test_audio_pids_keep_their_codec_and_language(self):
+        self.assertEqual(("MPEG-4 AAC ita",), self.service(101).audio)
+        self.assertEqual(
+            ("E-AC-3 ita", "MPEG-4 AAC eng"), self.service(102).audio
+        )
+
+    def test_a_service_without_audio_says_nothing_rather_than_guessing(self):
+        # 160 tivu' la guida carries one video PID and private sections only.
+        guide = self.service(160)
+
+        self.assertEqual("AVC 1920x1080", guide.video)
+        self.assertEqual((), guide.audio)
+
+    def test_a_radio_service_has_no_video(self):
+        radio = self.service(120)
+
+        self.assertEqual("", radio.video)
+        self.assertEqual(("MPEG-4 AAC ita",), radio.audio)
+
+    def test_private_sections_and_subtitles_are_not_media(self):
+        # La5 HD also carries AIT, two MHP carousels and two subtitle tracks.
+        self.assertEqual(("E-AC-3 ita", "MPEG-4 AAC eng"), self.service(102).audio)
+
+
+class SharedPidArithmeticTest(unittest.TestCase):
+    """L3c: the per-service column cannot be added up, and that is correct.
+
+    Measured on the first real 674 MHz capture (three selected services): the rows
+    show 6 + 11 + 11 = 28 PIDs, while the mux total says 22. Both numbers are
+    right. Five PIDs belong to two or three services at once (AIT, two MHP
+    carousels, two stream-descriptor PIDs), so 28 entries cover 20 unique service
+    PIDs, plus the 3 global ones (PAT, SDT/BAT, NIT) = 22 in the total.
+    """
+
+    FIXTURE = Path(__file__).resolve().parent / "fixtures" / "tsanalyze_674mhz_3services.json"
+
+    def setUp(self):
+        self.report = report.parse_tsanalyze_json(
+            self.FIXTURE.read_text(encoding="utf-8"), source="file capture_3.ts"
+        )
+
+    def test_the_rows_add_up_to_more_than_the_unique_total(self):
+        self.assertEqual([6, 11, 11], [len(s.pids) for s in self.report.services])
+        self.assertEqual(28, sum(len(s.pids) for s in self.report.services))
+
+    def test_the_shared_pids_are_the_difference(self):
+        unique = {pid.number for service in self.report.services for pid in service.pids}
+
+        self.assertEqual(20, len(unique))
+        self.assertEqual(22, self.report.integrity.pids.total)
+
+    def test_the_shared_pids_are_the_expected_ones(self):
+        owners = {}
+        for service in self.report.services:
+            for pid in service.pids:
+                owners.setdefault(pid.number, []).append(service.id)
+
+        shared = sorted(number for number, ids in owners.items() if len(ids) > 1)
+        self.assertEqual([6054, 7811, 7812, 7891, 7892], shared)
+
+
 class LayerBoundaryTest(unittest.TestCase):
     """S7 renders layers 1 and 2; layers 3 and 4 must never reach the model."""
 
@@ -178,6 +256,8 @@ class LayerBoundaryTest(unittest.TestCase):
             "pcr_pid",
             "bitrate_188",
             "pids",
+            "video",
+            "audio",
         },
         "PidInfo": {"number", "description", "bitrate_188"},
     }
