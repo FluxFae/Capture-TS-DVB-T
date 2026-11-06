@@ -95,6 +95,11 @@ class StreamReport:
     integrity: Integrity
     global_pids: GlobalPids
     services: tuple[Service, ...]
+    # Broadcast identifies a service with the triplet TSID, ONID, SID. The TSID of
+    # the mux lives in ``integrity.transport_stream_id`` and the SID in each
+    # service; the ONID only exists per service in the document, so it is
+    # projected here as the distinct values, in service order.
+    original_network_ids: tuple[int, ...]
 
 
 def parse_tsanalyze_json(raw: str, *, source: str) -> StreamReport:
@@ -162,7 +167,18 @@ def _build_report(document: dict, source: str) -> StreamReport:
         services=tuple(
             _service(entry, known_pids) for entry in document.get("services") or []
         ),
+        original_network_ids=_original_network_ids(document),
     )
+
+
+def _original_network_ids(document: dict) -> tuple[int, ...]:
+    """Distinct ONIDs carried by the services, in the order they appear."""
+    ordered: dict[int, None] = {}
+    for entry in document.get("services") or []:
+        onid = entry.get("original-network-id")
+        if onid is not None:
+            ordered[onid] = None
+    return tuple(ordered)
 
 
 def _service(entry: dict, known_pids: dict[int, PidInfo]) -> Service:

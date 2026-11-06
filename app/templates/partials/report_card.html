@@ -20,6 +20,16 @@
         <div class="flux-dvb-triplet__separator">
             <i data-lucide="chevron-right" class="flux-icon--xs"></i>
         </div>
+        {#- The ONID belongs to the service in the tsanalyze document, not to the mux,
+            so it is shown as the distinct values: one number for a normal mux, a list
+            when the capture really mixes original networks. -#}
+        <div class="flux-dvb-triplet__item">
+            <span class="flux-dvb-triplet__label">ONID</span>
+            <span class="flux-dvb-triplet__value" id="report-onid">{{ report.original_network_ids | join(', ') if report.original_network_ids else '—' }}</span>
+        </div>
+        <div class="flux-dvb-triplet__separator">
+            <i data-lucide="chevron-right" class="flux-icon--xs"></i>
+        </div>
         <div class="flux-dvb-triplet__item">
             <span class="flux-dvb-triplet__label">SERVICES</span>
             <span class="flux-dvb-triplet__value">{{ report.integrity.service_count }}</span>
@@ -72,6 +82,8 @@
         <table class="flux-table">
             <thead>
                 <tr>
+                    <th class="flux-table__th"
+                        title="Service ID in decimal: TSID + ONID + SID identify a service on air.">SID</th>
                     <th class="flux-table__th">Service</th>
                     <th class="flux-table__th">Codecs</th>
                     <th class="flux-table__th flux-table__th--right"
@@ -82,6 +94,7 @@
             <tbody>
                 {% for service in report.services %}
                 <tr class="flux-table__row">
+                    <td class="flux-table__td flux-table__td--mono">{{ service.id }}</td>
                     <td class="flux-table__td flux-table__td--name">{{ service.name or '—' }}</td>
                     <td class="flux-table__td">
                         {% if service.video %}
