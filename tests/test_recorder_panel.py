@@ -112,19 +112,22 @@ class ModeAndDurationSurviveTheRedrawTest(unittest.TestCase):
 
 
 class ProgressMessageTest(unittest.TestCase):
-    def test_an_active_capture_is_announced_below_the_button(self):
+    def test_an_active_capture_is_not_announced_again_below_the_button(self):
+        # L8b: the counters above already say RECORDING, the megabytes and the
+        # seconds, so the panel repeating them was the same thing said twice.
         recording = make_recording(services_filter=[101, 102, 103], duration_limit=120)
 
         html, _ = render_panel(RecordingState.RECORDING, recording)
 
-        self.assertIn("Recording", html)
-        self.assertIn("120", html)
+        self.assertNotIn("flux-record-summary--live", html)
+        self.assertNotIn("s captured", html)
+        self.assertNotIn("s target,", html)
 
     def test_tuning_says_starting_not_a_technical_claim(self):
         # "Waiting for signal lock" stayed on screen for the whole capture,
         # because the panel is only redrawn on start and stop. While tuning the
         # honest wording is "starting", and the technical detail belongs to the
-        # system log.
+        # system log. It is the one thing the counters above cannot say yet.
         recording = make_recording(duration_limit=30)
 
         html, _ = render_panel(RecordingState.TUNING, recording)
@@ -132,21 +135,15 @@ class ProgressMessageTest(unittest.TestCase):
         self.assertIn("Starting recording", html)
         self.assertNotIn("signal lock", html.lower())
 
-    def test_live_block_exposes_hooks_for_the_client_to_update(self):
+    def test_the_live_block_carries_no_counters_to_duplicate(self):
         recording = make_recording(services_filter=[101], duration_limit=120)
 
-        html, _ = render_panel(RecordingState.RECORDING, recording)
+        for state in (RecordingState.TUNING, RecordingState.RECORDING):
+            with self.subTest(state=state):
+                html, _ = render_panel(state, recording)
 
-        self.assertIn('data-target="120"', html)
-        self.assertIn('id="live-title"', html)
-        self.assertIn('id="live-detail"', html)
-
-    def test_live_block_without_a_limit_exposes_an_empty_target(self):
-        recording = make_recording()
-
-        html, _ = render_panel(RecordingState.RECORDING, recording)
-
-        self.assertIn('data-target=""', html)
+                self.assertNotIn("captured", html)
+                self.assertNotIn("data-target", html)
 
     def test_an_idle_panel_does_not_claim_to_be_recording(self):
         recording = make_recording(services_filter=[101], duration_limit=30, file_size_bytes=1024, duration_seconds=30)
@@ -155,6 +152,20 @@ class ProgressMessageTest(unittest.TestCase):
 
         self.assertNotIn("flux-record-summary--live", html)
         self.assertIn("capture_610MHz.ts", html, "the finished summary disappeared")
+
+    def test_the_finished_summary_names_the_file_without_repeating_the_counters(self):
+        """L8b on the line that stays: DURATION and FILE SIZE already said the rest.
+
+        The file it produced is the one fact those counters cannot give, so the
+        name stays; the seconds and the megabytes were the duplication again.
+        """
+        recording = make_recording(file_size_bytes=1024 * 1024, duration_seconds=30)
+
+        html, _ = render_panel(RecordingState.IDLE, recording)
+
+        self.assertIn("capture_610MHz.ts", html)
+        self.assertNotIn("1.0 MB", html)
+        self.assertNotIn("30s", html)
 
 
 if __name__ == "__main__":

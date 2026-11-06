@@ -6,7 +6,6 @@
 {%- set duration_value = (current_recording.duration_limit or 0) if current_recording else 0 -%}
 {%- set checked_full = 'checked' if mode == 'full_mux' else '' -%}
 {%- set checked_selected = 'checked' if mode == 'selected' else '' -%}
-{%- set live_target = (current_recording.duration_limit or '') if current_recording else '' -%}
 {% if recording_state == 'error' and current_recording and current_recording.last_error %}
 <div class="flux-alert flux-alert--error" id="recorder-error">
     <i data-lucide="alert-triangle" class="flux-icon"></i>
@@ -65,27 +64,21 @@
 </div>
 </form>
 
-{% if recording_state == 'tuning' or recording_state == 'recording' %}
-{#- The panel is not redrawn while a capture runs, so this block carries the
-    hooks app.js updates from the WebSocket telemetry (-1s invented state is
-    worse than no state). -#}
-<div class="flux-record-summary flux-record-summary--live" data-target="{{ live_target }}">
+{% if recording_state == 'tuning' %}
+{#- Only while nothing has arrived: the counters above already print the megabytes
+    and the seconds, so this line never repeats them, and app.js removes it on the
+    first locked state (L8b). -#}
+<div class="flux-record-summary flux-record-summary--live">
     <span class="flux-rec-pulse"></span>
     <div>
-        <strong id="live-title">{% if recording_state == 'tuning' %}Starting recording…{% else %}Recording{% endif %}</strong>
-        <span class="flux-text--muted" id="live-detail">
-            {% if recording_state == 'tuning' %}
-            Waiting for the first data…
-            {% elif live_target %}
-            {{ live_target }}s target, {{ current_recording.duration_seconds|int }}s captured
-            {% else %}
-            {{ current_recording.duration_seconds|int }}s captured, no limit
-            {% endif %}
-        </span>
+        <strong id="live-title">Starting recording…</strong>
+        <span class="flux-text--muted" id="live-detail">Waiting for the first data…</span>
     </div>
 </div>
 {% endif %}
 
+{#- What the file was called is the one fact the counters above cannot give. The
+    seconds and the megabytes were the duplication again (L8b), so they are gone. -#}
 {#- A byte count is never negative, so "not zero" is "greater than zero" without an
     operator the template linter misreads as unescaped markup. -#}
 {% if current_recording and recording_state == 'idle' and current_recording.file_size_bytes != 0 %}
@@ -93,11 +86,6 @@
     <i data-lucide="check-circle" class="flux-icon flux-color--success"></i>
     <div>
         <strong>{{ current_recording.filename }}</strong>
-        <span class="flux-text--muted">
-            {{ current_recording.duration_seconds|int }}s —
-            {% set size_mb = current_recording.file_size_bytes / (1024 * 1024) %}
-            {{ "%.1f"|format(size_mb) }} MB
-        </span>
     </div>
 </div>
 {% endif %}
